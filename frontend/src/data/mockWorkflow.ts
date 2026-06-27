@@ -1,0 +1,212 @@
+import { Workflow, TimelineEvent, EvidenceMapping, ResearchArtifact, ApprovalRequest, InterviewRound, CandidateAddendum, AuditEvent } from '../types';
+
+export const mockWorkflow: Workflow = {
+  id: 'wf_demo_maya_ai_solutions',
+  candidateId: 'cand_maya_tan',
+  candidateName: 'Maya Tan',
+  candidateEmail: 'maya.tan@example.com',
+  recruiterName: 'Alex Lee',
+  interviewerName: 'Priya Shah',
+  jobTitle: 'AI Solutions Engineer',
+  company: 'Example AI',
+  region: 'Singapore / APAC',
+  stage: 'interview_scheduled',
+  createdAt: '2026-06-12T02:00:00Z',
+  updatedAt: '2026-06-27T03:40:00Z',
+};
+
+export const mockTimelineEvents: TimelineEvent[] = [
+  {
+    id: 'te_1',
+    type: 'candidate_invited',
+    label: 'Candidate invited',
+    summary: 'Maya accepted the demo workflow invitation and consented to CV evidence analysis.',
+    timestamp: '2026-06-12T02:00:00Z',
+    actor: 'Alex Lee',
+    candidateVisible: true,
+    source: 'backend fixture',
+  },
+  {
+    id: 'te_2',
+    type: 'evidence_mapped',
+    label: 'CV evidence mapped',
+    summary: 'Role requirements were mapped to candidate-provided CV evidence with source labels.',
+    timestamp: '2026-06-12T04:15:00Z',
+    actor: 'Evidence agent',
+    candidateVisible: true,
+    source: 'CV + role scope',
+  },
+  {
+    id: 'te_3',
+    type: 'research_enriched',
+    label: 'Public role research added',
+    summary: 'Exa-backed company and role context was stored with source URLs.',
+    timestamp: '2026-06-13T01:30:00Z',
+    actor: 'Alex Lee',
+    candidateVisible: true,
+    source: 'Exa cached sources',
+  },
+  {
+    id: 'te_4',
+    type: 'interview_plan_prepared',
+    label: 'Interview plan prepared',
+    summary: 'Recruiter-facing questions were generated from proof areas to validate.',
+    timestamp: '2026-06-14T06:45:00Z',
+    actor: 'AI orchestrator',
+    candidateVisible: false,
+    source: 'AI synthesis',
+  },
+  {
+    id: 'te_5',
+    type: 'scheduling_pending',
+    label: 'Schedule pending approval',
+    summary: 'A Google Calendar / Meet payload is waiting for recruiter approval before any external event is created.',
+    timestamp: '2026-06-15T03:00:00Z',
+    actor: 'Alex Lee',
+    candidateVisible: true,
+    approvalId: 'ar_schedule_1',
+  },
+];
+
+export const mockEvidenceMappings: EvidenceMapping[] = [
+  {
+    id: 'ev_1',
+    requirement: 'Python and API integration depth',
+    evidence: 'CV page 1 lists Python services, REST API integrations, and evaluation tooling for LLM workflows.',
+    sourceLocation: 'CV p.1, Experience summary',
+    status: 'covered',
+    whyItMatters: 'The role asks for hands-on technical implementation with customer-facing AI systems.',
+    whatToAdd: 'Bring one concise story about debugging an integration issue under customer pressure.',
+    visibility: 'candidate-visible',
+  },
+  {
+    id: 'ev_2',
+    requirement: 'Customer-facing AI deployment',
+    evidence: 'CV page 2 mentions two enterprise rollout projects but does not show deployment size or adoption metrics.',
+    sourceLocation: 'CV p.2, Project work',
+    status: 'partial',
+    whyItMatters: 'Example AI needs someone who can turn AI prototypes into reliable customer deployments.',
+    whatToAdd: 'Add deployment metrics, customer type, launch timeline, and your ownership after release.',
+    visibility: 'candidate-visible',
+  },
+  {
+    id: 'ev_3',
+    requirement: 'LLM evaluation and quality measurement',
+    evidence: 'Resume describes prompt evaluation, red-team tests, and model-output review workflows.',
+    sourceLocation: 'CV p.1, AI evaluation section',
+    status: 'covered',
+    whyItMatters: 'The team needs source-backed evaluation habits, not only demo-building speed.',
+    whatToAdd: 'Prepare one example where evaluation changed the implementation or rollout plan.',
+    visibility: 'candidate-visible',
+  },
+  {
+    id: 'ev_4',
+    requirement: 'Post-launch ownership',
+    evidence: 'Evidence suggests launch involvement, but ongoing monitoring and customer success ownership are not explicit.',
+    sourceLocation: 'CV p.2, Enterprise rollout projects',
+    status: 'unclear',
+    whyItMatters: 'The role includes supporting customers after deployment, including incident response and iteration.',
+    whatToAdd: 'Clarify whether you owned support, monitoring, documentation, or adoption after launch.',
+    visibility: 'candidate-visible',
+  },
+  {
+    id: 'ev_5',
+    requirement: 'Enterprise stakeholder communication',
+    evidence: 'CV references demos to business teams, but does not name stakeholder groups or decision-making complexity.',
+    sourceLocation: 'CV p.2, Customer demos',
+    status: 'gap',
+    whyItMatters: 'Solutions engineers often translate technical constraints for enterprise buyers and operators.',
+    whatToAdd: 'Add a short example involving a customer sponsor, technical buyer, and implementation team.',
+    visibility: 'candidate-visible',
+  },
+  {
+    id: 'ev_6',
+    requirement: 'Internal recruiter note: compensation calibration',
+    evidence: 'Candidate location and seniority require recruiter-only compensation calibration before offer planning.',
+    sourceLocation: 'Recruiter note',
+    status: 'unclear',
+    whyItMatters: 'This is an internal planning note and is not used as candidate evidence.',
+    whatToAdd: 'Keep this internal; do not expose compensation deliberation in candidate-facing summaries.',
+    visibility: 'internal',
+  },
+];
+
+export const mockResearchArtifacts: ResearchArtifact[] = [
+  {
+    id: 'ra_1',
+    title: 'Example AI launches governed agent workflow tools',
+    url: 'https://example.com/example-ai-agent-workflows',
+    snippet: 'Public sources describe Example AI expanding its agent workflow product for customer operations teams.',
+    source: 'Exa cached',
+    freshness: 'cached 1 day ago',
+    type: 'company',
+    candidateSafe: true,
+    retrievedAt: '2026-06-26T04:20:00Z',
+  },
+  {
+    id: 'ra_2',
+    title: 'APAC teams adopt LLM evaluation programs for customer deployments',
+    url: 'https://example.com/apac-llm-evaluation',
+    snippet: 'This source reports growing demand for repeatable evaluation and monitoring in enterprise AI rollouts.',
+    source: 'Exa cached',
+    freshness: 'cached 2 days ago',
+    type: 'role-market',
+    candidateSafe: true,
+    retrievedAt: '2026-06-25T04:20:00Z',
+  },
+  {
+    id: 'ra_3',
+    title: 'Solutions engineering roles shift toward implementation governance',
+    url: 'https://example.com/solutions-engineering-governance',
+    snippet: 'Role-market context emphasizes stakeholder communication, technical discovery, and post-launch support.',
+    source: 'Exa cached',
+    freshness: 'cached 3 days ago',
+    type: 'role-market',
+    candidateSafe: true,
+    retrievedAt: '2026-06-24T04:20:00Z',
+  },
+];
+
+export const mockApprovalRequests: ApprovalRequest[] = [
+  {
+    id: 'ar_schedule_1',
+    type: 'scheduling',
+    status: 'pending',
+    candidateEmail: 'maya.tan@example.com',
+    interviewerName: 'Priya Shah',
+    dateTime: '2026-06-30T03:00:00Z',
+    timezone: 'Asia/Singapore',
+    duration: 45,
+  },
+];
+
+export const mockInterviewRounds: InterviewRound[] = [
+  {
+    id: 'round_1',
+    title: 'Customer AI deployment interview',
+    status: 'pending',
+    dateTime: '2026-06-30T03:00:00Z',
+    timezone: 'Asia/Singapore',
+    duration: 45,
+    attendees: ['Priya Shah', 'Alex Lee'],
+  },
+  {
+    id: 'round_2',
+    title: 'Technical implementation follow-up',
+    status: 'pending',
+    dateTime: '2026-07-03T04:00:00Z',
+    timezone: 'Asia/Singapore',
+    duration: 60,
+    attendees: ['Engineering reviewer', 'Alex Lee'],
+  },
+];
+
+export const mockAddenda: CandidateAddendum[] = [];
+
+export const mockAuditEvents: AuditEvent[] = [
+  { id: 'ae_1', eventType: 'auth.login', actor: 'Maya Tan', timestamp: '2026-06-12T02:00:00Z', summary: 'Interviewee demo session created.' },
+  { id: 'ae_2', eventType: 'agent.evidence.completed', actor: 'Evidence agent', timestamp: '2026-06-12T04:15:00Z', summary: 'Evidence mapped with candidate-visible and internal visibility labels.' },
+  { id: 'ae_3', eventType: 'exa.search.company.completed', actor: 'Alex Lee', timestamp: '2026-06-13T01:30:00Z', provider: 'Exa', summary: 'Company and role research stored with source URLs.' },
+  { id: 'ae_4', eventType: 'agent.questions.generated', actor: 'AI orchestrator', timestamp: '2026-06-14T06:45:00Z', summary: 'Interview questions generated from evidence gaps and safety checked.' },
+  { id: 'ae_5', eventType: 'approval.created', actor: 'Alex Lee', timestamp: '2026-06-15T03:00:00Z', summary: 'Scheduling approval requested for Google Calendar / Meet.' },
+];
