@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -11,7 +13,8 @@ from supwork_backend.main import create_app
 
 class BackendWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
-        settings = Settings(_env_file=None, supwork_provider="mock")
+        self.sqlite_path = Path(".local-data") / f"test-backend-{uuid4().hex}.sqlite"
+        settings = Settings(_env_file=None, supwork_provider="mock", sqlite_database_path=self.sqlite_path)
         self.client = TestClient(create_app(settings=settings))
         self.hr_token = self._login("hr@demo.supwork.local")
         self.candidate_token = self._login("interviewee@demo.supwork.local")
@@ -126,6 +129,29 @@ class BackendWorkflowTests(unittest.TestCase):
         trace = self.client.get("/api/workflows/wf_demo/agent-trace", headers=self._headers(self.hr_token))
         self.assertEqual(trace.status_code, 200, trace.text)
         self.assertTrue(any(run["agentName"] == "supwork-evidence-agent" for run in trace.json()["agentRuns"]))
+
+    def test_calendar_availability_compat_endpoint_returns_fixture_slots(self) -> None:
+        response = self.client.get(
+            "/api/interviews/calendar-availability",
+            params={
+                "startDateTime": "2026-06-01T00:00:00",
+                "endDateTime": "2026-07-01T00:00:00",
+                "timeZone": "Singapore Standard Time",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["providerMode"], "fixture")
+        self.assertEqual(body["timeZone"], "Asia/Singapore")
+        self.assertTrue(body["availableSlots"])
+        self.assertEqual(body["availableSlots"], body["availability"])
+
+    def test_sqlite_store_persists_tokens_across_app_instances(self) -> None:
+        settings = Settings(_env_file=None, supwork_provider="mock", sqlite_database_path=self.sqlite_path)
+        restarted_client = TestClient(create_app(settings=settings))
+        response = restarted_client.get("/api/auth/me", headers=self._headers(self.hr_token))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["user"]["email"], "hr@demo.supwork.local")
 
     def _schedule_payload(self, approval_id: str) -> dict:
         start = datetime.now(timezone.utc) + timedelta(days=2)

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import secrets
+import sqlite3
 import threading
+from contextlib import closing
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -625,3 +629,130 @@ class InMemoryStore:
         if workflow["stage"] != stage:
             workflow["stage"] = stage
             workflow["updatedAt"] = datetime.now(timezone.utc).isoformat()
+
+
+class SQLiteStore(InMemoryStore):
+    def __init__(self, database_path: str | Path) -> None:
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__()
+        self._init_db()
+        loaded = self._load_state()
+        if loaded is None:
+            self._save_state()
+        else:
+            self._state = loaded
+
+    def _init_db(self) -> None:
+        with closing(sqlite3.connect(self.database_path)) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_state (
+                    id TEXT PRIMARY KEY,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+
+    def _load_state(self) -> dict[str, Any] | None:
+        with closing(sqlite3.connect(self.database_path)) as conn:
+            row = conn.execute("SELECT state_json FROM app_state WHERE id = ?", ("default",)).fetchone()
+        if not row:
+            return None
+        return json.loads(row[0])
+
+    def _save_state(self) -> None:
+        state_json = json.dumps(self._state, sort_keys=True)
+        with closing(sqlite3.connect(self.database_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO app_state (id, state_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    state_json = excluded.state_json,
+                    updated_at = excluded.updated_at
+                """,
+                ("default", state_json, utc_now_iso()),
+            )
+            conn.commit()
+
+    def reset_demo(self, keep_tokens: bool = True) -> dict[str, Any]:
+        result = super().reset_demo(keep_tokens=keep_tokens)
+        self._save_state()
+        return result
+
+    def login(self, email: str, password: str, expected_password: str) -> dict[str, Any]:
+        result = super().login(email, password, expected_password)
+        self._save_state()
+        return result
+
+    def analyze_evidence(self, workflow_id: str, actor: dict[str, Any], provider_mode: str = "mock") -> dict[str, Any]:
+        result = super().analyze_evidence(workflow_id, actor, provider_mode)
+        self._save_state()
+        return result
+
+    def add_research(self, artifact: dict[str, Any]) -> dict[str, Any]:
+        result = super().add_research(artifact)
+        self._save_state()
+        return result
+
+    def save_interview_plan(self, workflow_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+        result = super().save_interview_plan(workflow_id, plan)
+        self._save_state()
+        return result
+
+    def create_approval(self, workflow_id: str, action_type: str, payload: dict[str, Any], risk_level: str, provider: str, actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().create_approval(workflow_id, action_type, payload, risk_level, provider, actor)
+        self._save_state()
+        return result
+
+    def decide_approval(self, approval_id: str, status: str, actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().decide_approval(approval_id, status, actor)
+        self._save_state()
+        return result
+
+    def mark_approval_executed(self, approval_id: str) -> None:
+        super().mark_approval_executed(approval_id)
+        self._save_state()
+
+    def save_schedule(self, workflow_id: str, approval_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        round_record = super().save_schedule(workflow_id, approval_id, result)
+        self._save_state()
+        return round_record
+
+    def add_notes(self, workflow_id: str, notes: str, visibility: str, actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().add_notes(workflow_id, notes, visibility, actor)
+        self._save_state()
+        return result
+
+    def complete_round(self, workflow_id: str, round_id: str, notes: str, visibility: str, actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().complete_round(workflow_id, round_id, notes, visibility, actor)
+        self._save_state()
+        return result
+
+    def submit_addendum(self, workflow_id: str, round_id: str, body: str, addendum_type: str, sensitive: bool, actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().submit_addendum(workflow_id, round_id, body, addendum_type, sensitive, actor)
+        self._save_state()
+        return result
+
+    def acknowledge_addendum(self, workflow_id: str, addendum_id: str, actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().acknowledge_addendum(workflow_id, addendum_id, actor)
+        self._save_state()
+        return result
+
+    def save_feedback_draft(self, workflow_id: str, subject: str, body: str, safety: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+        result = super().save_feedback_draft(workflow_id, subject, body, safety, actor)
+        self._save_state()
+        return result
+
+    def link_draft_approval(self, draft_id: str, approval_id: str) -> dict[str, Any]:
+        result = super().link_draft_approval(draft_id, approval_id)
+        self._save_state()
+        return result
+
+    def save_gmail_result(self, workflow_id: str, approval_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        draft = super().save_gmail_result(workflow_id, approval_id, result)
+        self._save_state()
+        return draft

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -11,7 +13,11 @@ from supwork_backend.main import create_app
 
 class FakeEndToEndWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
-        settings = Settings(_env_file=None, supwork_provider="mock")
+        settings = Settings(
+            _env_file=None,
+            supwork_provider="mock",
+            sqlite_database_path=Path(".local-data") / f"test-e2e-{uuid4().hex}.sqlite",
+        )
         self.client = TestClient(create_app(settings=settings))
         self.hr_token = self._login("hr@demo.supwork.local")
         self.candidate_token = self._login("interviewee@demo.supwork.local")

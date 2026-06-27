@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from supwork_backend.config import Settings, get_settings
@@ -26,12 +27,12 @@ from supwork_backend.schemas import (
     RoundCompleteRequest,
     ResearchRequest,
 )
-from supwork_backend.store import ForbiddenError, InMemoryStore, NotFoundError
+from supwork_backend.store import ForbiddenError, InMemoryStore, NotFoundError, SQLiteStore
 
 
 def create_app(settings: Settings | None = None, store: InMemoryStore | None = None) -> FastAPI:
     settings = settings or get_settings()
-    store = store or InMemoryStore()
+    store = store or (SQLiteStore(settings.sqlite_database_path) if settings.supwork_storage_mode == "sqlite" else InMemoryStore())
     model = ModelProvider(settings)
     exa = ExaClient(settings)
     google = GoogleClients(settings)
@@ -73,6 +74,25 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
         artifact["researchType"] = research_type
         return store.add_research(artifact)
 
+    def parse_calendar_datetime(value: str, tz: timezone) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid datetime: {value}") from exc
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=tz)
+        return parsed.astimezone(tz)
+
+    def normalize_timezone(value: str) -> tuple[str, timezone]:
+        normalized = value.strip() if value else settings.google_calendar_time_zone
+        aliases = {
+            "singapore standard time": ("Asia/Singapore", timezone(timedelta(hours=8))),
+            "asia/singapore": ("Asia/Singapore", timezone(timedelta(hours=8))),
+            "sgt": ("Asia/Singapore", timezone(timedelta(hours=8))),
+            "utc": ("UTC", timezone.utc),
+        }
+        return aliases.get(normalized.lower(), (normalized, timezone(timedelta(hours=8))))
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": settings.app_name}
@@ -80,6 +100,49 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     @app.get("/api/provider-status")
     def get_provider_status() -> dict[str, Any]:
         return provider_status(settings, model, exa, google)
+
+    @app.get("/api/interviews/calendar-availability")
+    def calendar_availability(
+        startDateTime: str = Query(...),
+        endDateTime: str = Query(...),
+        timeZone: str = Query(default="Asia/Singapore"),
+    ) -> dict[str, Any]:
+        time_zone_name, tz = normalize_timezone(timeZone)
+        start = parse_calendar_datetime(startDateTime, tz)
+        end = parse_calendar_datetime(endDateTime, tz)
+        if end <= start:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="endDateTime must be after startDateTime")
+
+        slots: list[dict[str, Any]] = []
+        day = start.date()
+        last_day = end.date()
+        while day <= last_day and len(slots) < 20:
+            if day.weekday() < 5:
+                for slot_time in (time(10, 0), time(14, 30)):
+                    slot_start = datetime.combine(day, slot_time, tzinfo=tz)
+                    slot_end = slot_start + timedelta(minutes=45)
+                    if start <= slot_start and slot_end <= end:
+                        slots.append(
+                            {
+                                "startDateTime": slot_start.isoformat(),
+                                "endDateTime": slot_end.isoformat(),
+                                "timeZone": time_zone_name,
+                                "durationMinutes": 45,
+                                "status": "available",
+                            }
+                        )
+            day += timedelta(days=1)
+
+        return {
+            "providerMode": "fixture",
+            "calendarId": settings.google_calendar_id,
+            "timeZone": time_zone_name,
+            "startDateTime": start.isoformat(),
+            "endDateTime": end.isoformat(),
+            "availableSlots": slots,
+            "busySlots": [],
+            "availability": slots,
+        }
 
     @app.post("/api/auth/login", response_model=LoginResponse)
     def login(request: LoginRequest) -> dict[str, Any]:

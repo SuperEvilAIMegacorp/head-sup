@@ -14,6 +14,7 @@ import {
   runResearch,
   scheduleGoogleMeet,
   submitAddendum as submitBackendAddendum,
+  SupworkApiError,
   type BackendAddendum,
   type BackendAuditEvent,
   type BackendCandidateWorkflow,
@@ -72,7 +73,7 @@ const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined
 const WORKFLOW_ID = 'wf_demo';
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
-  const { accessToken, backendAvailable, user } = useAuth();
+  const { accessToken, backendAvailable, logout, user } = useAuth();
   const [workflow, setWorkflow] = useState<Workflow>(mockWorkflow);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>(mockTimelineEvents);
   const [evidenceMappings, setEvidenceMappings] = useState<EvidenceMapping[]>(mockEvidenceMappings);
@@ -119,6 +120,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         : await getRecruiterWorkflow(accessToken, WORKFLOW_ID);
       applyBackendView(view);
     } catch (error) {
+      if (error instanceof SupworkApiError && error.status === 401) {
+        logout();
+      }
       setSyncState({
         backendAvailable: false,
         dataSource: 'fixture',
@@ -126,7 +130,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         lastSyncedAt: new Date().toISOString(),
       });
     }
-  }, [accessToken, applyBackendView, canUseBackend, user]);
+  }, [accessToken, applyBackendView, canUseBackend, logout, user]);
 
   useEffect(() => {
     void refreshWorkflow();

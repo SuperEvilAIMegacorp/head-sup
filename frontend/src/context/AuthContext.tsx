@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { login as backendLogin } from '@/api/supworkClient';
+import { getMe, login as backendLogin } from '@/api/supworkClient';
 import { AuthSession, User } from '../types';
 
 interface AuthContextType {
@@ -18,18 +18,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [backendAvailable, setBackendAvailable] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const stored = window.localStorage.getItem('supwork-demo-session');
     if (stored) {
       const session = JSON.parse(stored) as AuthSession;
       setUser(session.user);
       setAccessToken(session.accessToken);
       setBackendAvailable(session.backendAvailable);
-      return;
+      if (session.backendAvailable && session.accessToken) {
+        void getMe(session.accessToken).catch(() => {
+          if (cancelled) return;
+          setUser(null);
+          setAccessToken(null);
+          setBackendAvailable(false);
+          window.localStorage.removeItem('supwork-demo-session');
+        });
+      }
+      return () => {
+        cancelled = true;
+      };
     }
     const legacy = window.localStorage.getItem('supwork-demo-user');
     if (legacy) {
       setUser(JSON.parse(legacy) as User);
     }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = async (email: string, pass: string) => {

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     port: int = 8787
     frontend_origin: str = ""
     supwork_provider: str = "mock"
-    supwork_storage_mode: str = "fixture"
+    supwork_storage_mode: str = "sqlite"
     demo_password: str = "demo"
 
     database_url: str = ""
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""
     supabase_storage_bucket: str = "supwork-artifacts"
+    sqlite_database_path: Path = Field(default=Path(".local-data/supwork.sqlite"))
 
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
