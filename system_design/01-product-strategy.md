@@ -154,7 +154,7 @@ sup'work is:
 
 - Candidate addendum attachments and additional evidence upload.
 - Application tracker sync.
-- Hosted Postgres.
+- Supabase Postgres persistence with Auth and Storage for the hosted demo.
 - Admin integration setup screen.
 - Analytics for evidence coverage.
 

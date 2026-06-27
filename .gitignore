@@ -1,0 +1,7 @@
+.env
+secrets/
+.venv/
+.local-data/
+.pytest_cache/
+__pycache__/
+*.py[cod]

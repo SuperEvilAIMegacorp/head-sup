@@ -1,0 +1,49 @@
+# Core backend API
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+pydantic>=2.10,<3
+pydantic-settings>=2.8,<3
+python-dotenv>=1.0,<2
+python-multipart>=0.0.20,<1
+email-validator>=2.2,<3
+orjson>=3.10,<4
+
+# HTTP clients, retries, and provider wrappers
+httpx>=0.28,<1
+tenacity>=9.0,<10
+
+# Azure OpenAI / OpenAI-compatible model provider
+openai>=1.68,<2
+tiktoken>=0.9,<1
+azure-identity>=1.19,<2
+
+# Supabase Postgres, Auth, and Storage
+supabase>=2.13,<3
+psycopg[binary]>=3.2,<4
+SQLAlchemy>=2.0,<3
+alembic>=1.14,<2
+PyJWT[crypto]>=2.10,<3
+
+# Exa research integration
+exa-py>=1.8,<2
+
+# Google Calendar / Meet and Gmail integrations
+google-api-python-client>=2.160,<3
+google-auth>=2.38,<3
+google-auth-oauthlib>=1.2,<2
+google-auth-httplib2>=0.2,<1
+
+# CV, PDF, and document extraction
+pypdf>=5.0,<6
+pdfplumber>=0.11,<1
+python-docx>=1.1,<2
+
+# Security and local auth helpers
+cryptography>=44,<46
+passlib[bcrypt]>=1.7,<2
+
+# Test and smoke-check support
+pytest>=8.3,<9
+pytest-asyncio>=0.25,<1
+respx>=0.22,<1
+freezegun>=1.5,<2

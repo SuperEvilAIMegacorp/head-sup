@@ -377,6 +377,9 @@ Response:
 ```json
 {
   "mode": "live",
+  "database": { "provider": "supabase_postgres", "configured": true, "status": "ready" },
+  "auth": { "provider": "supabase_auth", "configured": true, "status": "ready" },
+  "storage": { "provider": "supabase_storage", "configured": true, "status": "ready" },
   "exa": { "configured": true, "status": "ready" },
   "googleCalendar": { "configured": true, "status": "ready" },
   "workato": { "configured": true, "status": "ready" },
@@ -396,6 +399,13 @@ PORT=8787
 FRONTEND_ORIGIN=
 
 SUPWORK_PROVIDER=mock
+
+DATABASE_URL=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_JWT_SECRET=
+SUPABASE_STORAGE_BUCKET=supwork-artifacts
+
 OPENAI_API_KEY=
 AZURE_OPENAI_ENDPOINT=
 AZURE_OPENAI_API_KEY=

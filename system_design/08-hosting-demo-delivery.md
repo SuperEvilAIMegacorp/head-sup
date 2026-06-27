@@ -26,11 +26,14 @@ Preferred proof:
 ```text
 Frontend: Vercel, Netlify, Azure Static Web Apps, or equivalent
 Backend: Render, Railway, Fly.io, Cloud Run, or equivalent
-Database: SQLite for hackathon demo; Postgres if time allows
-Auth: server-side sessions or JWTs with seeded HR/interviewee accounts
+Database: Supabase Postgres
+Auth: Supabase Auth or backend-issued sessions with seeded HR/interviewee accounts
+Storage: Supabase Storage for CVs, addendum attachments, and generated artifacts
 Secrets: backend environment variables only
 CORS: restrict to hosted frontend origin
 ```
+
+Supabase is the recommended hosted data stack for the demo. Keep SQLite only as a local fixture fallback when credentials or hosted connectivity are unavailable.
 
 ## Runtime Modes
 
@@ -51,6 +54,12 @@ PORT=8787
 FRONTEND_ORIGIN=https://your-frontend.example.com
 
 SUPWORK_PROVIDER=mock
+
+DATABASE_URL=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_JWT_SECRET=
+SUPABASE_STORAGE_BUCKET=supwork-artifacts
 
 EXA_API_KEY=
 EXA_BASE_URL=https://api.exa.ai
@@ -86,6 +95,8 @@ Never commit:
 - Google refresh token
 - Workato webhook URLs
 - Exa key
+- Supabase service-role key
+- Supabase JWT secret
 - private resumes
 - real transcripts
 - local databases
@@ -193,6 +204,9 @@ Before recording or presenting:
 
 - Hosted frontend loads.
 - Hosted backend health endpoint responds.
+- Supabase Postgres connection works.
+- Supabase Auth or backend demo-session login works.
+- Supabase Storage bucket exists if upload flows are enabled.
 - CORS works from frontend to backend.
 - Seed workflow loads.
 - HR login works.
@@ -219,6 +233,7 @@ Before recording or presenting:
 | Meet conference pending | Show `conference_pending`, then refresh or use fixture event. |
 | Workato callback delayed | Show `automation_pending` and audit request. |
 | Model provider fails | Use mock provider output. |
+| Supabase connection fails | Use local fixture mode for the walkthrough and avoid live upload steps. |
 | Auth/session fails | Use pre-seeded demo credentials and keep both browsers logged in before judging. |
 | Addendum update is delayed | Refresh both accounts and show persisted addendum/audit event. |
 | Backend cold start | Keep a health tab open and pre-warm before presentation. |

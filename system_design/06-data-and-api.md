@@ -13,6 +13,26 @@ The data model must support:
 - Integration receipts.
 - Auditability.
 - Demo fixtures and live provider metadata.
+- Version history for AI-generated and human-edited content.
+
+## Persistence Stack
+
+Use Supabase Postgres as the preferred hosted database for the hackathon and MVP.
+
+Recommended implementation:
+
+- Store core workflow entities in relational tables with foreign keys.
+- Use `jsonb` columns for provider metadata, generated-content context, safety-check details, and API payload summaries.
+- Use Supabase Auth for seeded HR and interviewee identities where practical; the backend still verifies identity and shapes role-specific API responses.
+- Use Supabase Storage for CVs, addendum attachments, and generated artifact files; store only storage paths and metadata in Postgres.
+- Keep Supabase service-role credentials on the backend only.
+- Use row-level security as defense in depth, not as the only visibility boundary.
+
+Frontend access rule:
+
+- The frontend may use Supabase Auth for login if adopted.
+- The frontend should not directly read or mutate workflow tables.
+- Candidate and HR screens should consume backend view-model APIs so visibility, approvals, and audit events remain centralized.
 
 ## Core Entities
 
@@ -313,6 +333,7 @@ Fields:
 - `id`
 - `workflow_id`
 - `channel`
+- `current_version_id`
 - `subject`
 - `body`
 - `visibility_check_status`
@@ -322,6 +343,33 @@ Fields:
 - `status`
 - `created_at`
 - `updated_at`
+
+### `communication_draft_versions`
+
+Version history for generated and edited candidate-facing drafts. This is how HR can see changes in content produced by the AI or edited by a human before approval.
+
+Fields:
+
+- `id`
+- `draft_id`
+- `version_number`
+- `subject`
+- `body`
+- `change_summary`
+- `created_by_actor_type`
+- `created_by_actor_id`
+- `source_context_json`
+- `safety_check_json`
+- `visibility`
+- `created_at`
+
+Rules:
+
+- Do not overwrite prior generated draft text.
+- Every AI regeneration or human edit creates a new version.
+- Approval should reference the exact version approved.
+- Candidate APIs return only the approved candidate-visible version.
+- Recruiter APIs may show version diff/history with internal context where allowed.
 
 ### `approval_requests`
 
@@ -386,6 +434,30 @@ Fields:
 - `trace_id`
 - `created_at`
 
+### `supabase_storage_objects`
+
+Application-level metadata for files stored in Supabase Storage.
+
+Fields:
+
+- `id`
+- `workflow_id`
+- `artifact_id`
+- `bucket`
+- `object_path`
+- `content_type`
+- `size_bytes`
+- `hash`
+- `visibility`
+- `uploaded_by`
+- `created_at`
+
+Rules:
+
+- Store paths and metadata, not public anonymous URLs.
+- Generate short-lived signed URLs only through backend authorization.
+- Attachments inherit candidate/addendum visibility unless explicitly reviewed and relabeled.
+
 ### `candidate_receipts`
 
 Candidate-visible summary of important actions.
@@ -419,6 +491,7 @@ Rules:
 - Internal notes are never included in candidate API payloads by default.
 - Public research is labeled separately from candidate evidence.
 - Visibility is stored as data, not inferred from prose.
+- Supabase row-level security should enforce coarse user boundaries, while backend view shaping enforces product visibility.
 
 ## View Models
 
@@ -454,6 +527,7 @@ Rules:
   "interviewPlan": {},
   "candidateAddenda": [],
   "approvals": [],
+  "draftHistory": [],
   "integrationEvents": [],
   "auditEvents": []
 }

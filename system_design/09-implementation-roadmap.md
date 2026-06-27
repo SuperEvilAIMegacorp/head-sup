@@ -7,7 +7,7 @@ Build the product around the hosted demo path first, then deepen integrations. T
 Use this priority order:
 
 1. Authenticated HR/interviewee product shell.
-2. Shared workflow and seeded data.
+2. Supabase Postgres schema, seeded workflow, and demo user identities.
 3. Evidence mapping and transparency timeline.
 4. Exa research and source display.
 5. Approval cards.
@@ -31,11 +31,11 @@ Tasks:
 
 - Add sup'work branding.
 - Add login screen.
-- Add seeded HR and interviewee accounts.
+- Add seeded HR and interviewee accounts in Supabase Auth or backend demo-session storage.
 - Add role-based routing.
 - Build Candidate Home.
 - Build Recruiter Pipeline or Candidate Packet.
-- Seed demo candidate, role, and workflow.
+- Seed demo candidate, role, workflow, and audit records in Supabase Postgres.
 - Add fixture provider status.
 
 Verification:
@@ -44,6 +44,7 @@ Verification:
 - Interviewee account screenshot.
 - HR account screenshot.
 - Auth/session smoke check.
+- Supabase seed smoke check.
 
 ## Phase 2: Evidence And Transparency
 
@@ -57,6 +58,7 @@ Tasks:
 
 - Implement or adapt CV/job-scope extraction.
 - Generate evidence mappings.
+- Store extracted artifact metadata and optional file objects through Supabase Storage.
 - Add evidence statuses.
 - Add candidate-facing evidence cards.
 - Add candidate correction/add-on affordance.
@@ -175,6 +177,7 @@ Tasks:
 - Add seeded/manual notes input.
 - Include reviewed addendum context where appropriate.
 - Add feedback generation.
+- Add draft version history for AI-generated and human-edited content.
 - Add visibility checker.
 - Add feedback release approval.
 - Add Gmail draft/send or Workato action.
@@ -193,11 +196,13 @@ Exit criteria:
 
 - Demo can show a complete audit chain.
 - Provider readiness is visible.
+- Supabase database/auth/storage readiness is visible without exposing secrets.
 
 Tasks:
 
 - Add audit event taxonomy.
 - Add provider status endpoint.
+- Add Supabase database/auth/storage status checks.
 - Add audit UI.
 - Add trace IDs across actions.
 - Add error states.
@@ -243,6 +248,7 @@ Verification:
 | --- | --- |
 | Product/docs | Product narrative, demo script, system design, README. |
 | Frontend shell | Login, navigation, Interviewee account, HR account, responsive layout. |
+| Supabase platform | Postgres schema, seeds, Auth setup, Storage buckets, RLS baseline. |
 | CV evidence UI | Evidence cards, PDF/highlight display, add-on actions. |
 | Research UI | Exa source cards, research panels, role brief. |
 | Interview UI | Interview plan, prep brief, notes, feedback. |
@@ -260,6 +266,7 @@ Verification:
 
 Backend unit tests:
 
+- Supabase repository or database adapter behavior.
 - Evidence mapping statuses.
 - Interviewee/HR visibility shaping.
 - Auth role enforcement.
@@ -270,6 +277,7 @@ Backend unit tests:
 - Workato callback validates HMAC/shared secret.
 - Candidate feedback excludes internal notes.
 - Candidate addendum sensitive handling.
+- Draft version history preserves generated and edited content.
 - Audit events are created.
 
 Frontend checks:
@@ -288,6 +296,7 @@ Smoke scripts:
 ```powershell
 npm run build
 uv run python -m unittest discover -s tests -v
+uv run python scripts/supabase_seed_smoke.py --summary-only
 uv run python scripts/supwork_workflow_smoke.py --summary-only
 uv run python scripts/google_calendar_smoke.py --dry-run
 uv run python scripts/workato_webhook_smoke.py --dry-run
@@ -301,6 +310,7 @@ The MVP is demo-ready when:
 
 - HR and interviewee accounts show the same workflow with role-shaped views.
 - Login/auth works against the hosted backend.
+- Supabase Postgres stores the shared workflow, approvals, draft versions, receipts, and audit events.
 - Evidence mapping is visible and constructive.
 - Exa research has source URLs.
 - Interview plan ties questions to evidence gaps.
@@ -323,6 +333,7 @@ The MVP is demo-ready when:
 | Internal notes leak to candidate | Visibility labels, API shaping, and safety checker. |
 | UI feels recruiter-first | Start demo on the interviewee laptop and keep candidate timeline central. |
 | Auth breaks in demo | Pre-seed accounts, keep sessions warm, and provide deterministic demo credentials. |
+| Supabase connection fails | Keep SQLite/fixture mode as a local fallback for walkthrough continuity. |
 | Addendum includes sensitive content | Mark as sensitive, restrict to HR, and prevent AI from inferring protected characteristics. |
 | Hosted backend cold starts | Pre-warm and keep health endpoint ready. |
 | Too much scope | Prioritize one end-to-end workflow over broad feature count. |
@@ -333,9 +344,9 @@ The MVP is demo-ready when:
 2. Google scheduling auth: OAuth refresh token for one demo organizer account, with Workato fallback.
 3. Workato first recipe: recommend Gmail draft plus tracker row, or Google Meet fallback if Calendar direct blocks.
 4. Email behavior: recommend Gmail draft for demo; sending only if approval and test account are safe.
-5. Database: SQLite for hackathon demo unless hosted persistence requires Postgres.
+5. Database: Supabase Postgres for hosted demo and MVP; SQLite remains local fixture fallback only.
 6. Model provider: mock for golden path, live provider as enhancement.
-7. Auth implementation: simple email/password or signed demo-session flow; avoid frontend-only role switching.
+7. Auth implementation: Supabase Auth for seeded HR/interviewee users if setup is fast; otherwise backend-issued demo sessions, with no frontend-only role switching.
 
 ## Final Build Guidance
 

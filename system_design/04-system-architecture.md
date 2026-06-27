@@ -21,6 +21,8 @@ Candidate Portal / Recruiter Workspace
 
 sup'work is built around one core rule: the backend is the control plane. The frontend never calls Exa, Workato, Google, Gmail, or model providers directly.
 
+Supabase is the preferred hosted data platform for the hackathon build because it gives the team managed Postgres, Auth, Storage, Realtime primitives, and an admin dashboard in one service. sup'work should use Supabase Postgres as the durable source of truth, but workflow reads and writes still pass through the backend API so approval checks, role-shaped visibility, and audit logging remain enforceable.
+
 ## Logical Components
 
 ### Frontend App
@@ -55,6 +57,7 @@ Frontend must not:
 Responsibilities:
 
 - Authentication and demo-user identity.
+- Supabase Auth token verification or backend-issued demo sessions.
 - Role-based access control for HR and interviewee accounts.
 - Workflow state machine.
 - Artifact upload and extraction.
@@ -68,6 +71,8 @@ Responsibilities:
 - Audit logging.
 - Visibility filtering.
 - Provider status.
+
+The backend may use Supabase service credentials for database and storage operations. Those credentials must never be shipped to the frontend.
 
 ### Workflow Service
 
@@ -123,7 +128,8 @@ Each service should:
 ```text
 Frontend: localhost Vite app
 Backend: localhost Python or Node API
-Database: SQLite/local file storage
+Database: SQLite for fast fixture mode, or Supabase local/hosted Postgres for integration mode
+Storage: local fixture files, or Supabase Storage bucket for upload flows
 Providers: mock by default, live optional
 ```
 
@@ -132,9 +138,9 @@ Providers: mock by default, live optional
 ```text
 Frontend: Vercel, Netlify, Azure Static Web Apps, or equivalent
 Backend: Render, Railway, Fly.io, Cloud Run, or equivalent
-Database: SQLite for demo or hosted Postgres
-Storage: local demo storage or object storage if hosted backend needs it
-Auth: demo HR and interviewee accounts backed by server-side sessions or JWTs
+Database: Supabase Postgres
+Storage: Supabase Storage for CVs, addendum attachments, and generated artifacts that need file backing
+Auth: Supabase Auth or backend-issued sessions mapped to seeded HR/interviewee accounts
 Secrets: backend environment variables only
 ```
 
@@ -143,13 +149,30 @@ Secrets: backend environment variables only
 ```text
 Frontend: static hosting with HTTPS
 Backend: containerized API service
-Database: Postgres
-File storage: object storage
+Database: Postgres, with Supabase acceptable until scale or compliance needs justify a different managed Postgres
+File storage: Supabase Storage or equivalent object storage
 Queue: background jobs for slow integrations
 Secrets: managed secret store
 Auth: role-based access control
 Audit: immutable event log
 ```
+
+## Supabase Boundary
+
+Use Supabase for:
+
+- Postgres tables for workflows, approvals, generated draft versions, provider events, receipts, and audit events.
+- Auth identities for seeded HR and interviewee demo users if this is faster than custom auth.
+- Storage buckets for CV uploads, addendum attachments, and generated exports.
+- Optional Realtime subscriptions for candidate timeline, schedule, addendum, and receipt updates.
+
+Do not use Supabase to bypass backend rules:
+
+- The frontend must not directly mutate workflow tables.
+- Row-level security should deny broad client access by default.
+- The backend should shape interviewee and HR view models explicitly.
+- Storage uploads should go through backend-issued signed URLs or backend proxy validation.
+- Service-role credentials stay server-side only.
 
 ## Runtime Modes
 
@@ -215,7 +238,8 @@ Interviewee opens hosted sup'work on laptop B
 
 Both sessions operate on the same workflow ID
   -> Backend enforces role-based visibility
-  -> Timeline, schedule, addendum, receipts, and audit updates persist to shared DB
+  -> Timeline, schedule, addendum, receipts, and audit updates persist to Supabase Postgres
+  -> Optional Supabase Realtime notifies both sessions to refresh shaped backend views
 ```
 
 ## Request Flow: Candidate Feedback Release
@@ -254,6 +278,8 @@ Database:
 - Stores visibility labels.
 - Stores audit events.
 - Stores provider metadata, not raw secrets.
+- Uses Supabase Postgres `jsonb` fields for flexible provider payload summaries and generated-content context.
+- Uses relational foreign keys for workflow, approval, draft-version, integration-event, and audit chains.
 
 External providers:
 
