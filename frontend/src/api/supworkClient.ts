@@ -58,6 +58,17 @@ export function analyzeEvidence(token: string, workflowId = "wf_demo") {
   });
 }
 
+export function uploadCvAnalysis(token: string, workflowId: string, file: File, jobScopeText: string) {
+  const form = new FormData();
+  form.set("file", file);
+  form.set("jobScopeText", jobScopeText);
+  return request<Record<string, unknown>>(`/api/recruiter/workflows/${workflowId}/cv/upload-analysis`, {
+    body: form,
+    method: "POST",
+    token,
+  });
+}
+
 export function runResearch(token: string, workflowId = "wf_demo", researchType: "company" | "role-market" = "company") {
   const path = researchType === "company" ? "/api/research/company" : "/api/research/role-market";
   return request<Record<string, unknown>>(path, {
@@ -75,6 +86,21 @@ export function runResearch(token: string, workflowId = "wf_demo", researchType:
 
 export function generateInterviewPlan(token: string, workflowId = "wf_demo") {
   return request<Record<string, unknown>>(`/api/recruiter/workflows/${workflowId}/questions`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function getCandidateRounds(token: string, workflowId = "wf_demo") {
+  return request<{ workflowId: string; rounds: BackendRound[] }>(`/api/candidate/workflows/${workflowId}/rounds`, { token });
+}
+
+export function getRecruiterRounds(token: string, workflowId = "wf_demo") {
+  return request<{ workflowId: string; rounds: BackendRound[] }>(`/api/recruiter/workflows/${workflowId}/rounds`, { token });
+}
+
+export function generateRoundQuestions(token: string, workflowId: string, roundId: string) {
+  return request<Record<string, unknown>>(`/api/recruiter/workflows/${workflowId}/rounds/${roundId}/questions`, {
     method: "POST",
     token,
   });
@@ -152,11 +178,48 @@ export function completeRound(
   });
 }
 
+export function storeRoundTranscript(
+  token: string,
+  workflowId: string,
+  roundId: string,
+  input: { provider?: string; sourceType?: "live" | "talentflow_placeholder" | "manual"; transcriptText: string },
+) {
+  return request<Record<string, unknown>>(`/api/recruiter/workflows/${workflowId}/rounds/${roundId}/transcript`, {
+    body: {
+      provider: input.provider ?? "manual",
+      sourceType: input.sourceType ?? "live",
+      transcriptText: input.transcriptText,
+      visibility: "interviewer_internal",
+    },
+    method: "POST",
+    token,
+  });
+}
+
+export function reviewRound(
+  token: string,
+  workflowId: string,
+  roundId: string,
+  input: { outcome?: string; summary?: string } = {},
+) {
+  return request<Record<string, unknown>>(`/api/recruiter/workflows/${workflowId}/rounds/${roundId}/review`, {
+    body: { outcome: input.outcome ?? "advance", summary: input.summary ?? "" },
+    method: "POST",
+    token,
+  });
+}
+
 export function submitAddendum(
   token: string,
   workflowId: string,
   roundId: string,
-  input: { addendumType: string; body: string; sensitiveFlag: boolean },
+  input: {
+    addendumType: string;
+    attachments?: Array<Record<string, unknown>>;
+    body: string;
+    links?: Array<Record<string, unknown>>;
+    sensitiveFlag: boolean;
+  },
 ) {
   return request<Record<string, unknown>>(`/api/candidate/workflows/${workflowId}/rounds/${roundId}/addendum`, {
     body: input,
@@ -165,8 +228,14 @@ export function submitAddendum(
   });
 }
 
-export function acknowledgeAddendum(token: string, workflowId: string, addendumId: string) {
+export function acknowledgeAddendum(
+  token: string,
+  workflowId: string,
+  addendumId: string,
+  input: { reviewNote?: string; reviewStatus?: string } = {},
+) {
   return request<Record<string, unknown>>(`/api/recruiter/workflows/${workflowId}/addenda/${addendumId}/acknowledge`, {
+    body: input,
     method: "POST",
     token,
   });
@@ -180,11 +249,21 @@ export function generateFeedbackDraft(token: string, workflowId = "wf_demo", nex
   });
 }
 
-export function createFeedbackReleaseApproval(token: string, workflowId = "wf_demo") {
+export function createFeedbackReleaseApproval(
+  token: string,
+  workflowId = "wf_demo",
+  input: {
+    approvedBody?: string;
+    draftId?: string;
+    editedBody?: string;
+    sourceMaterialSummary?: string;
+    subject?: string;
+  } = {},
+) {
   return request<{ approval: BackendApproval; draft: Record<string, unknown> }>(
     `/api/recruiter/workflows/${workflowId}/feedback-release-approval`,
     {
-      body: { actionType: "create_gmail_draft", channel: "gmail", riskLevel: "medium" },
+      body: { actionType: "create_gmail_draft", channel: "gmail", riskLevel: "medium", ...input },
       method: "POST",
       token,
     },
@@ -217,13 +296,20 @@ export function resetDemo(token: string) {
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers({ Accept: "application/json" });
-  if (options.body !== undefined) headers.set("Content-Type", "application/json");
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (options.body !== undefined && !isFormData) headers.set("Content-Type", "application/json");
   if (options.token) headers.set("Authorization", `Bearer ${options.token}`);
+  let body: BodyInit | undefined;
+  if (isFormData) {
+    body = options.body as FormData;
+  } else if (options.body !== undefined) {
+    body = JSON.stringify(options.body);
+  }
 
   let response: Response;
   try {
     response = await fetch(`${SUPWORK_API_BASE}${path}`, {
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body,
       cache: "no-store",
       headers,
       method: options.method ?? "GET",
@@ -291,6 +377,62 @@ export interface BackendInterviewRound {
   createdAt?: string;
 }
 
+export interface BackendRoundQuestion {
+  id?: string;
+  prompt?: string;
+  question?: string;
+  rationale?: string;
+  expectedSignal?: string;
+  evidenceTarget?: string;
+  followUp?: string;
+  visibility?: string;
+  source?: string;
+}
+
+export interface BackendRoundEvidence {
+  id?: string;
+  title?: string;
+  body?: string;
+  kind?: "transcript" | "manual" | "candidate_addendum" | "cv_evidence";
+  sourceLabel?: string;
+  statusLabel?: string;
+  visibility?: string;
+}
+
+export interface BackendRound {
+  id: string;
+  workflowId: string;
+  roundNumber: number;
+  roundType?: string;
+  title: string;
+  roundStatus?: string;
+  status?: string;
+  statusLabel?: string;
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
+  timezone?: string | null;
+  meetingProvider?: string | null;
+  meetingJoinUrl?: string | null;
+  notesStatus?: string;
+  approvalId?: string | null;
+  traceId?: string | null;
+  hrBriefing?: string;
+  candidateBriefing?: string;
+  validationFocus?: string[];
+  candidatePrep?: string[];
+  candidatePrepThemes?: string[];
+  answerShape?: string[];
+  addendumPrompt?: string;
+  nextHumanAction?: string;
+  questions?: BackendRoundQuestion[];
+  transcriptEvidence?: BackendRoundEvidence[];
+  transcriptPlaceholderPath?: string;
+  reviewStatus?: string;
+  reviewSummary?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface BackendWorkflowBase {
   workflowId: string;
   candidate: { email: string; name: string };
@@ -317,6 +459,8 @@ export interface BackendWorkflowBase {
   agentFilledFields?: Record<string, unknown> | null;
   feedback?: { body: string; status: string; subject: string } | null;
   receipts?: Record<string, unknown>[];
+  sourceArtifacts?: BackendSourceArtifact[];
+  rounds?: BackendRound[];
 }
 
 export interface BackendCandidateWorkflow extends BackendWorkflowBase {
@@ -351,6 +495,16 @@ export interface BackendEvidenceMapping {
   visibility: string;
 }
 
+export interface BackendSourceArtifact {
+  id: string;
+  filename: string;
+  contentType?: string;
+  pageCount?: number;
+  parser?: string;
+  pages?: Array<{ page: number; text: string; charCount?: number }>;
+  uploadedAt?: string;
+}
+
 export interface BackendResearchArtifact {
   id: string;
   workflowId: string;
@@ -373,7 +527,11 @@ export interface BackendAddendum {
   roundId: string;
   addendumType?: string;
   type?: string;
+  attachments?: Array<{ filename?: string; name?: string; size?: string; sizeBytes?: number }>;
   body: string;
+  candidateVisibleReceipt?: string;
+  links?: Array<{ label?: string; linkType?: string; url: string }>;
+  reviewNotes?: string | null;
   sensitiveFlag?: boolean;
   sensitive?: boolean;
   status: string;

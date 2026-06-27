@@ -1,10 +1,10 @@
 import { Workflow, TimelineEvent, EvidenceMapping, ResearchArtifact, ApprovalRequest, InterviewRound, CandidateAddendum, AuditEvent } from '../types';
 
 export const mockWorkflow: Workflow = {
-  id: 'wf_demo_maya_ai_solutions',
-  candidateId: 'cand_maya_tan',
-  candidateName: 'Maya Tan',
-  candidateEmail: 'maya.tan@example.com',
+  id: 'wf_demo_nicholas_ai_solutions',
+  candidateId: 'usr_candidate',
+  candidateName: 'Nicholas Ting',
+  candidateEmail: 'interviewee@demo.supwork.local',
   recruiterName: 'Alex Lee',
   interviewerName: 'Priya Shah',
   jobTitle: 'AI Solutions Engineer',
@@ -20,7 +20,7 @@ export const mockTimelineEvents: TimelineEvent[] = [
     id: 'te_1',
     type: 'candidate_invited',
     label: 'Candidate invited',
-    summary: 'Maya accepted the demo workflow invitation and consented to CV evidence analysis.',
+    summary: 'Nicholas accepted the demo workflow invitation and consented to CV evidence analysis.',
     timestamp: '2026-06-12T02:00:00Z',
     actor: 'Alex Lee',
     candidateVisible: true,
@@ -172,7 +172,7 @@ export const mockApprovalRequests: ApprovalRequest[] = [
     id: 'ar_schedule_1',
     type: 'scheduling',
     status: 'pending',
-    candidateEmail: 'maya.tan@example.com',
+    candidateEmail: 'interviewee@demo.supwork.local',
     interviewerName: 'Priya Shah',
     dateTime: '2026-06-30T03:00:00Z',
     timezone: 'Asia/Singapore',
@@ -204,7 +204,7 @@ export const mockInterviewRounds: InterviewRound[] = [
 export const mockAddenda: CandidateAddendum[] = [];
 
 export const mockAuditEvents: AuditEvent[] = [
-  { id: 'ae_1', eventType: 'auth.login', actor: 'Maya Tan', timestamp: '2026-06-12T02:00:00Z', summary: 'Interviewee demo session created.' },
+  { id: 'ae_1', eventType: 'auth.login', actor: 'Nicholas Ting', timestamp: '2026-06-12T02:00:00Z', summary: 'Interviewee demo session created.' },
   { id: 'ae_2', eventType: 'agent.evidence.completed', actor: 'Evidence agent', timestamp: '2026-06-12T04:15:00Z', summary: 'Evidence mapped with candidate-visible and internal visibility labels.' },
   { id: 'ae_3', eventType: 'exa.search.company.completed', actor: 'Alex Lee', timestamp: '2026-06-13T01:30:00Z', provider: 'Exa', summary: 'Company and role research stored with source URLs.' },
   { id: 'ae_4', eventType: 'agent.questions.generated', actor: 'AI orchestrator', timestamp: '2026-06-14T06:45:00Z', summary: 'Interview questions generated from evidence gaps and safety checked.' },

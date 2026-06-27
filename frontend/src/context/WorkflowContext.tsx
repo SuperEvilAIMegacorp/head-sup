@@ -7,20 +7,28 @@ import {
   createApproval,
   createFeedbackReleaseApproval,
   createGmailDraft,
+  generateRoundQuestions as generateBackendRoundQuestions,
   generateFeedbackDraft,
   generateInterviewPlan as generateBackendInterviewPlan,
   getCandidateWorkflow,
   getRecruiterWorkflow,
+  reviewRound as reviewBackendRound,
   runResearch,
   scheduleGoogleMeet,
+  storeRoundTranscript as storeBackendRoundTranscript,
   submitAddendum as submitBackendAddendum,
   SupworkApiError,
+  uploadCvAnalysis as uploadBackendCvAnalysis,
   type BackendAddendum,
   type BackendAuditEvent,
   type BackendCandidateWorkflow,
   type BackendEvidenceMapping,
   type BackendRecruiterWorkflow,
   type BackendResearchArtifact,
+  type BackendRound,
+  type BackendRoundEvidence,
+  type BackendRoundQuestion,
+  type BackendSourceArtifact,
 } from '@/api/supworkClient';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -33,6 +41,7 @@ import {
   InterviewPlan,
   CandidateAddendum,
   AuditEvent,
+  SourceArtifact,
   WorkflowSyncState,
 } from '../types';
 import {
@@ -56,16 +65,20 @@ interface WorkflowContextType {
   interviewPlan: InterviewPlan | null;
   addenda: CandidateAddendum[];
   auditEvents: AuditEvent[];
+  sourceArtifacts: SourceArtifact[];
   syncState: WorkflowSyncState;
 
   refreshWorkflow: () => Promise<void>;
+  uploadCvAnalysis: (file: File, jobScopeText: string) => Promise<void>;
   approveScheduling: (id: string) => Promise<void>;
   submitAddendum: (data: Omit<CandidateAddendum, 'id' | 'status' | 'submittedAt'>) => Promise<void>;
-  acknowledgeAddendum: (id: string, actorName: string) => Promise<void>;
+  acknowledgeAddendum: (id: string, actorName: string, reviewNote?: string) => Promise<void>;
   runExaResearch: () => Promise<void>;
-  generateInterviewPlan: () => Promise<void>;
+  generateInterviewPlan: (roundId?: string) => Promise<void>;
+  storeInterviewTranscript: (roundId: string, transcriptText: string, sourceType?: 'live' | 'talentflow_placeholder' | 'manual') => Promise<void>;
+  reviewInterviewRound: (roundId: string, summary: string, outcome?: string) => Promise<void>;
   completeInterviewRound: (roundId: string, notes: string) => Promise<void>;
-  approveFollowUp: (email: string, draftId: string) => Promise<void>;
+  approveFollowUp: (email: string, draftId: string, draft?: { body?: string; subject?: string }) => Promise<void>;
   addAuditEvent: (event: Omit<AuditEvent, 'id'>) => void;
 }
 
@@ -83,6 +96,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [interviewPlan, setInterviewPlan] = useState<InterviewPlan | null>(null);
   const [addenda, setAddenda] = useState<CandidateAddendum[]>(mockAddenda);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(mockAuditEvents);
+  const [sourceArtifacts, setSourceArtifacts] = useState<SourceArtifact[]>([]);
   const [syncState, setSyncState] = useState<WorkflowSyncState>({
     backendAvailable: false,
     dataSource: 'fixture',
@@ -99,6 +113,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setTimelineEvents(mapTimeline(view.timeline ?? ('auditEvents' in view ? view.auditEvents : [])));
     setAuditEvents(mapAudit('auditEvents' in view ? view.auditEvents : view.timeline));
     setAddenda(mapAddenda(candidateAddenda));
+    setSourceArtifacts(mapSourceArtifacts(view.sourceArtifacts));
     setInterviewRounds(prev => mapRounds(view, prev));
     setApprovalRequests(prev => mapApprovals(view, prev));
     setInterviewPlan('interviewPlan' in view ? mapInterviewPlan(view.interviewPlan) : null);
@@ -143,6 +158,14 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }, 3500);
     return () => window.clearInterval(id);
   }, [canUseBackend, refreshWorkflow]);
+
+  const uploadCvAnalysis = async (file: File, jobScopeText: string) => {
+    if (!canUseBackend || !accessToken) {
+      throw new Error('Live backend connection is required for CV upload and parsing.');
+    }
+    await uploadBackendCvAnalysis(accessToken, WORKFLOW_ID, file, jobScopeText);
+    await refreshWorkflow();
+  };
 
   const addAuditEvent = useCallback((event: Omit<AuditEvent, 'id'>) => {
     const newEvent: AuditEvent = { ...event, id: `ae_${Date.now()}` };
@@ -213,11 +236,13 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const submitAddendum = async (data: Omit<CandidateAddendum, 'id' | 'status' | 'submittedAt'>) => {
     if (canUseBackend && accessToken) {
-      const roundId = interviewRounds.find(round => round.status === 'complete' || round.status === 'scheduled')?.id;
+      const roundId = interviewRounds.find(round => isRoundComplete(round.status))?.id;
       if (!roundId) throw new Error('No interview round is available for addendum submission.');
       await submitBackendAddendum(accessToken, WORKFLOW_ID, roundId, {
         addendumType: data.type,
+        attachments: data.attachments,
         body: data.body,
+        links: [],
         sensitiveFlag: data.sensitive,
       });
       await refreshWorkflow();
@@ -248,9 +273,12 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const acknowledgeAddendum = async (id: string, actorName: string) => {
+  const acknowledgeAddendum = async (id: string, actorName: string, reviewNote?: string) => {
     if (canUseBackend && accessToken) {
-      await acknowledgeBackendAddendum(accessToken, WORKFLOW_ID, id);
+      await acknowledgeBackendAddendum(accessToken, WORKFLOW_ID, id, {
+        reviewNote: reviewNote?.trim() || undefined,
+        reviewStatus: 'acknowledged',
+      });
       await refreshWorkflow();
       return;
     }
@@ -306,12 +334,36 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const generateInterviewPlan = async () => {
+  const generateInterviewPlan = async (roundId?: string) => {
     if (canUseBackend && accessToken) {
       await analyzeEvidence(accessToken, WORKFLOW_ID);
-      await generateBackendInterviewPlan(accessToken, WORKFLOW_ID);
+      if (roundId) {
+        await generateBackendRoundQuestions(accessToken, WORKFLOW_ID, roundId);
+      } else {
+        await generateBackendInterviewPlan(accessToken, WORKFLOW_ID);
+      }
       await refreshWorkflow();
     }
+  };
+
+  const storeInterviewTranscript = async (
+    roundId: string,
+    transcriptText: string,
+    sourceType: 'live' | 'talentflow_placeholder' | 'manual' = 'live',
+  ) => {
+    if (!canUseBackend || !accessToken) {
+      throw new Error('Live backend connection is required for transcript storage.');
+    }
+    await storeBackendRoundTranscript(accessToken, WORKFLOW_ID, roundId, { sourceType, transcriptText });
+    await refreshWorkflow();
+  };
+
+  const reviewInterviewRound = async (roundId: string, summary: string, outcome = 'advance') => {
+    if (!canUseBackend || !accessToken) {
+      throw new Error('Live backend connection is required for round review.');
+    }
+    await reviewBackendRound(accessToken, WORKFLOW_ID, roundId, { outcome, summary });
+    await refreshWorkflow();
   };
 
   const completeInterviewRound = async (roundId: string, notes: string) => {
@@ -324,15 +376,21 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setWorkflow(prev => ({ ...prev, stage: 'interview_complete' }));
   };
 
-  const approveFollowUp = async (email: string, draftId: string) => {
+  const approveFollowUp = async (email: string, draftId: string, draft?: { body?: string; subject?: string }) => {
     if (canUseBackend && accessToken) {
-      const draft = await generateFeedbackDraft(accessToken, WORKFLOW_ID);
-      const approvalResult = await createFeedbackReleaseApproval(accessToken, WORKFLOW_ID);
+      const generatedDraft = await generateFeedbackDraft(accessToken, WORKFLOW_ID);
+      const subject = draft?.subject?.trim() || String(generatedDraft.subject ?? 'Next steps from supwork');
+      const body = draft?.body?.trim() || String(generatedDraft.body ?? 'Candidate-safe follow-up approved.');
+      const approvalResult = await createFeedbackReleaseApproval(accessToken, WORKFLOW_ID, {
+        editedBody: body,
+        sourceMaterialSummary: 'Reviewed interview notes and candidate addendum context in supwork.',
+        subject,
+      });
       await approveApproval(accessToken, approvalResult.approval.id);
       await createGmailDraft(accessToken, {
         approvalId: approvalResult.approval.id,
-        body: String(draft.body ?? approvalResult.draft.body ?? 'Candidate-safe follow-up approved.'),
-        subject: String(draft.subject ?? approvalResult.draft.subject ?? 'Next steps from supwork'),
+        body: String(approvalResult.draft.body ?? body),
+        subject: String(approvalResult.draft.subject ?? subject),
         to: email,
         workflowId: WORKFLOW_ID,
       });
@@ -368,13 +426,17 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     interviewPlan,
     addenda,
     auditEvents,
+    sourceArtifacts,
     syncState,
     refreshWorkflow,
+    uploadCvAnalysis,
     approveScheduling,
     submitAddendum,
     acknowledgeAddendum,
     runExaResearch,
     generateInterviewPlan,
+    storeInterviewTranscript,
+    reviewInterviewRound,
     completeInterviewRound,
     approveFollowUp,
     addAuditEvent,
@@ -388,6 +450,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     interviewPlan,
     addenda,
     auditEvents,
+    sourceArtifacts,
     syncState,
     refreshWorkflow,
   ]);
@@ -433,10 +496,24 @@ function mapEvidence(items: BackendEvidenceMapping[] = []): EvidenceMapping[] {
     id: item.id,
     requirement: item.requirement,
     sourceLocation: sourceLocationLabel(item.sourceLocation),
+    sourceExcerpt: sourceLocationExcerpt(item.sourceLocation) ?? item.candidateEvidence ?? item.evidence,
+    sourcePage: sourceLocationPage(item.sourceLocation),
     status: item.status,
     visibility: item.visibility === 'candidate_visible' ? 'candidate-visible' : 'internal',
     whatToAdd: item.candidateAction ?? item.whatToAdd ?? '',
     whyItMatters: item.whyItMatters,
+  }));
+}
+
+function mapSourceArtifacts(items: BackendSourceArtifact[] = []): SourceArtifact[] {
+  return items.map(item => ({
+    contentType: item.contentType,
+    filename: item.filename,
+    id: item.id,
+    pageCount: item.pageCount,
+    pages: item.pages ?? [],
+    parser: item.parser,
+    uploadedAt: item.uploadedAt,
   }));
 }
 
@@ -491,7 +568,7 @@ function mapApprovals(view: BackendCandidateWorkflow | BackendRecruiterWorkflow,
       googleMeetLink: schedule.meetLink,
       id: schedule.approvalId ?? 'backend_schedule',
       interviewerName: 'Priya Shah',
-      status: schedule.status === 'scheduled' || schedule.status === 'complete' ? 'approved' : 'pending',
+      status: schedule.status === 'scheduled' || isRoundComplete(normalizeRoundStatus(schedule.status)) ? 'approved' : 'pending',
       timezone: schedule.timeZone ?? 'Asia/Singapore',
       type: 'scheduling',
     }];
@@ -500,8 +577,15 @@ function mapApprovals(view: BackendCandidateWorkflow | BackendRecruiterWorkflow,
 }
 
 function mapRounds(view: BackendCandidateWorkflow | BackendRecruiterWorkflow, previous: InterviewRound[]): InterviewRound[] {
+  const backendRounds = Array.isArray(view.rounds) ? view.rounds : [];
+  if (backendRounds.length) {
+    return [...backendRounds]
+      .sort((a, b) => (a.roundNumber ?? 999) - (b.roundNumber ?? 999))
+      .map((round, index) => mapBackendRound(round, view, index));
+  }
+
   if (!view.schedule) return previous.length ? previous : mockInterviewRounds;
-  const status = view.schedule.status === 'complete' ? 'complete' : view.schedule.status === 'scheduled' ? 'scheduled' : 'pending';
+  const status = normalizeRoundStatus(view.schedule.status);
   return [{
     attendees: ['Priya Shah', 'Alex Lee'],
     dateTime: view.schedule.startDateTime ?? mockInterviewRounds[0].dateTime,
@@ -512,6 +596,69 @@ function mapRounds(view: BackendCandidateWorkflow | BackendRecruiterWorkflow, pr
     timezone: view.schedule.timeZone ?? 'Asia/Singapore',
     title: 'Customer AI deployment interview',
   }];
+}
+
+function mapBackendRound(round: BackendRound, view: BackendCandidateWorkflow | BackendRecruiterWorkflow, index: number): InterviewRound {
+  const fallback = mockInterviewRounds[index] ?? mockInterviewRounds[0];
+  const start = round.scheduledStart ?? '';
+  const end = round.scheduledEnd;
+  return {
+    addendumPrompt: round.addendumPrompt,
+    answerShape: Array.isArray(round.answerShape) ? round.answerShape.map(String) : [],
+    attendees: ['Priya Shah', 'Alex Lee'],
+    candidateBriefing: round.candidateBriefing,
+    candidatePrepThemes: (round.candidatePrepThemes ?? round.candidatePrep ?? []).map(String),
+    dateTime: start,
+    duration: durationMinutes(start, end) ?? fallback.duration ?? 45,
+    hrBriefing: round.hrBriefing,
+    id: round.id,
+    meetLink: round.meetingJoinUrl ?? undefined,
+    nextHumanAction: round.nextHumanAction,
+    questions: mapRoundQuestions(round.questions),
+    reviewStatus: round.reviewStatus,
+    reviewSummary: round.reviewSummary,
+    roundNumber: round.roundNumber,
+    roundType: round.roundType,
+    status: normalizeRoundStatus(round.roundStatus ?? round.status),
+    timezone: round.timezone ?? view.schedule?.timeZone ?? fallback.timezone ?? 'Asia/Singapore',
+    title: round.title,
+    transcriptEvidence: mapRoundEvidence(round.transcriptEvidence),
+    transcriptPlaceholderPath: round.transcriptPlaceholderPath,
+    validationFocus: (round.validationFocus ?? []).map(String),
+  };
+}
+
+function mapRoundQuestions(items: BackendRoundQuestion[] = []): InterviewRound['questions'] {
+  return items.map((item, index) => ({
+    evidenceTarget: item.evidenceTarget,
+    expectedSignal: item.expectedSignal,
+    followUp: item.followUp,
+    id: item.id ?? `round_question_${index}`,
+    prompt: item.prompt ?? item.question ?? 'Walk through one relevant example.',
+    rationale: item.rationale,
+    source: item.source,
+    visibility: item.visibility,
+  }));
+}
+
+function mapRoundEvidence(items: BackendRoundEvidence[] = []): InterviewRound['transcriptEvidence'] {
+  return items.map((item, index) => ({
+    body: item.body ?? '',
+    id: item.id ?? `round_evidence_${index}`,
+    kind: item.kind ?? 'manual',
+    sourceLabel: item.sourceLabel,
+    statusLabel: item.statusLabel,
+    title: item.title ?? 'Round evidence',
+    visibility: item.visibility,
+  }));
+}
+
+function durationMinutes(start?: string | null, end?: string | null) {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return Math.round((endMs - startMs) / 60000);
 }
 
 function mapInterviewPlan(plan: Record<string, unknown> | null | undefined): InterviewPlan | null {
@@ -538,9 +685,13 @@ function mapAddenda(items: BackendAddendum[] = []): CandidateAddendum[] {
   return items.map(item => ({
     acknowledgedAt: item.reviewedAt ?? undefined,
     acknowledgedBy: item.reviewedBy ?? undefined,
-    attachments: [],
+    attachments: (item.attachments ?? []).map(file => ({
+      name: file.name ?? file.filename ?? 'Candidate attachment',
+      size: file.size ?? (typeof file.sizeBytes === 'number' ? `${Math.max(1, Math.round(file.sizeBytes / 1024))} KB` : 'metadata only'),
+    })),
     body: item.body,
     id: item.id,
+    reviewNote: item.reviewNotes ?? undefined,
     sensitive: Boolean(item.sensitiveFlag ?? item.sensitive),
     status: item.status === 'acknowledged' ? 'acknowledged' : 'pending',
     submittedAt: item.submittedAt,
@@ -582,9 +733,42 @@ function sourceLocationLabel(value: BackendEvidenceMapping['sourceLocation']) {
   return `${page}${section}`;
 }
 
+function sourceLocationExcerpt(value: BackendEvidenceMapping['sourceLocation']) {
+  if (!value || typeof value === 'string') return undefined;
+  return typeof value.excerpt === 'string' ? value.excerpt : undefined;
+}
+
+function sourceLocationPage(value: BackendEvidenceMapping['sourceLocation']) {
+  if (!value || typeof value === 'string') return undefined;
+  return typeof value.page === 'number' ? value.page : undefined;
+}
+
 function normalizeApprovalStatus(status: string): ApprovalRequest['status'] {
   if (status === 'approved' || status === 'pending' || status === 'rejected') return status;
   return status === 'executed' ? 'approved' : 'pending';
+}
+
+function normalizeRoundStatus(status?: string | null): InterviewRound['status'] {
+  switch (status) {
+    case 'locked':
+    case 'ready':
+    case 'pre_interview':
+    case 'questions_ready':
+    case 'scheduled':
+    case 'transcript_ready':
+    case 'complete':
+    case 'completed':
+    case 'interview_completed':
+    case 'supplement_submitted':
+    case 'reviewed':
+      return status;
+    default:
+      return 'pending';
+  }
+}
+
+function isRoundComplete(status: InterviewRound['status']) {
+  return ['complete', 'completed', 'interview_completed', 'supplement_submitted', 'reviewed'].includes(status);
 }
 
 function humanizeEvent(type: string) {

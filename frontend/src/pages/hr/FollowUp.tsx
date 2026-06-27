@@ -8,12 +8,13 @@ import { Mail, CheckCircle2, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 export default function FollowUp() {
-  const { timelineEvents, approveFollowUp } = useWorkflow();
+  const { timelineEvents, approveFollowUp, workflow } = useWorkflow();
   const [isApproving, setIsApproving] = useState(false);
+  const [draftSubject, setDraftSubject] = useState("Next steps - Example AI");
 
   const followUpSent = timelineEvents.some(e => e.type === 'follow_up_sent');
 
-  const draftText = `Hi Maya,
+  const [draftText, setDraftText] = useState(`Hi Nicholas,
 
 Thank you for your time in the interview process with Example AI. We appreciate the thoughtful discussion and any context you chose to add through sup'work.
 
@@ -21,12 +22,15 @@ We are reviewing next steps and will follow up after the hiring team completes i
 
 Best regards,
 Alex
-Example AI Hiring Team`;
+Example AI Hiring Team`);
 
   const handleApprove = async () => {
     setIsApproving(true);
     try {
-      await approveFollowUp('maya.tan@example.com', 'gmail_draft_supwork_001');
+      await approveFollowUp(workflow.candidateEmail, 'gmail_draft_supwork_001', {
+        body: draftText,
+        subject: draftSubject,
+      });
       toast.success("Follow-up email approved");
     } catch (error) {
       toast.error("Failed to approve draft");
@@ -51,15 +55,21 @@ Example AI Hiring Team`;
             <CardContent className="p-6">
               <div className="flex items-center gap-2 mb-4 text-sm">
                 <span className="font-semibold text-muted-foreground w-8">To:</span> 
-                <span>maya.tan@example.com</span>
+                <span>{workflow.candidateEmail}</span>
               </div>
               <div className="flex items-center gap-2 mb-4 text-sm">
                 <span className="font-semibold text-muted-foreground w-8">Subj:</span> 
-                <span>Next steps - Example AI</span>
+                <input
+                  className="flex-1 rounded-md border border-border bg-muted/10 px-3 py-2 text-sm outline-none focus:bg-background"
+                  value={draftSubject}
+                  onChange={event => setDraftSubject(event.target.value)}
+                  readOnly={followUpSent}
+                />
               </div>
               <Textarea 
                 className="min-h-[280px] text-base p-4 resize-none border-border"
-                defaultValue={draftText}
+                value={draftText}
+                onChange={event => setDraftText(event.target.value)}
                 readOnly={followUpSent}
               />
             </CardContent>

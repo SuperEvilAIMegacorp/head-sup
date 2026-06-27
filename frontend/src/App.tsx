@@ -15,6 +15,7 @@ import IntInterviewPrep from "@/pages/interviewee/InterviewPrep";
 import IntSchedule from "@/pages/interviewee/Schedule";
 import IntAddendum from "@/pages/interviewee/PostInterviewAddendum";
 import IntFeedback from "@/pages/interviewee/Feedback";
+import IntDataConsent from "@/pages/interviewee/DataConsent";
 import HRPipeline from "@/pages/hr/Pipeline";
 import HRCandidatePacket from "@/pages/hr/CandidatePacket";
 import HRResearch from "@/pages/hr/Research";
@@ -51,6 +52,9 @@ function Router() {
       </Route>
       <Route path="/interviewee/feedback">
         <AppShell><IntFeedback /></AppShell>
+      </Route>
+      <Route path="/interviewee/data-consent">
+        <AppShell><IntDataConsent /></AppShell>
       </Route>
 
       <Route path="/hr">

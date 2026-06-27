@@ -1,12 +1,60 @@
+import { useEffect, useState } from "react";
 import { useWorkflow } from "@/context/WorkflowContext";
+import { useAuth } from "@/context/AuthContext";
+import { getCandidateWorkflow } from "@/api/supworkClient";
 import { Card, CardContent } from "@/components/ui/card";
-import { ShieldCheck, CheckCircle2, Clock, Paperclip } from "lucide-react";
+import { ShieldCheck, CheckCircle2, Clock, Paperclip, FileText, ReceiptText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export default function Feedback() {
-  const { addenda, timelineEvents } = useWorkflow();
+  const { accessToken, backendAvailable } = useAuth();
+  const { addenda, evidenceMappings, researchArtifacts, timelineEvents } = useWorkflow();
+  const [releasedFeedback, setReleasedFeedback] = useState<{ body: string; status: string; subject?: string } | null>(null);
+  const [feedbackSyncError, setFeedbackSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!backendAvailable || !accessToken) {
+      setReleasedFeedback(null);
+      setFeedbackSyncError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const token = accessToken;
+    async function loadReleasedFeedback() {
+      try {
+        const view = await getCandidateWorkflow(token, "wf_demo");
+        if (cancelled) return;
+        const feedback = view.feedback;
+        if (feedback?.body && isReleasedFeedbackStatus(feedback.status)) {
+          setReleasedFeedback({
+            body: feedback.body,
+            status: feedback.status,
+            subject: feedback.subject,
+          });
+        } else {
+          setReleasedFeedback(null);
+        }
+        setFeedbackSyncError(null);
+      } catch (error) {
+        if (!cancelled) {
+          setFeedbackSyncError(error instanceof Error ? error.message : "Unable to sync feedback.");
+        }
+      }
+    }
+
+    void loadReleasedFeedback();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, backendAvailable]);
+
   const followUpApproved = timelineEvents.some(event => event.type === 'follow_up_sent' || event.type === 'gmail.draft.created' || event.type === 'gmail.message.sent');
   const addendum = addenda[0];
+  const visibleEvidence = evidenceMappings.filter(mapping => mapping.visibility === 'candidate-visible');
+  const visibleSources = researchArtifacts.filter(source => source.candidateSafe !== false);
+  const canShowReleasedBody = Boolean(releasedFeedback?.body);
+  const showReleasedState = followUpApproved || canShowReleasedBody;
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
@@ -18,7 +66,7 @@ export default function Feedback() {
         </p>
       </section>
 
-      {!followUpApproved ? (
+      {!showReleasedState ? (
         <Card className="border-dashed shadow-sm">
           <CardContent className="flex flex-col items-center p-12 text-center">
             <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
@@ -42,6 +90,11 @@ export default function Feedback() {
                 </p>
               </div>
             </div>
+            {feedbackSyncError && (
+              <p className="mt-5 max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                Backend feedback sync is unavailable right now, so this page is showing fixture-safe status only.
+              </p>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -54,36 +107,64 @@ export default function Feedback() {
           <Card>
             <CardContent className="space-y-6 p-6">
               <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-bold text-slate-950">Released feedback</h2>
-                <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Approved</Badge>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-950">Released feedback</h2>
+                  {releasedFeedback?.subject && (
+                    <p className="mt-1 text-sm text-slate-500">{releasedFeedback.subject}</p>
+                  )}
+                </div>
+                <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+                  {releasedFeedback?.status === "sent" ? "Sent" : "Approved"}
+                </Badge>
               </div>
 
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Observed evidence</h3>
-                <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">
-                  <li>Evidence suggests strong Python, API integration, and LLM evaluation experience.</li>
-                  <li>The interview discussion clarified customer deployment steps and monitoring ownership.</li>
-                  <li>Enterprise stakeholder examples could still be made more concrete.</li>
-                </ul>
-              </div>
-
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Interviewer interpretation</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-700">
-                  The discussion indicates practical implementation depth. The team would benefit from one more concrete example of managing enterprise stakeholders through launch risk.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Recommended next step</h3>
-                <p className="mt-3 text-sm font-medium leading-6 text-slate-800">
-                  HR may request a focused follow-up on post-launch ownership and stakeholder communication.
-                </p>
-              </div>
+              {canShowReleasedBody ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Approved message</h3>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-800">
+                    {releasedFeedback?.body}
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h3 className="text-sm font-bold text-amber-950">Approved status received; message body not synced</h3>
+                  <p className="mt-2 text-sm leading-6 text-amber-900">
+                    The workflow shows that HR approved a candidate-safe follow-up, but this frontend session does not yet have the approved backend body. It will appear here after the candidate workflow includes `feedback.body`.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          <section className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <FileText className="mb-3 h-4 w-4 text-teal-700" />
+              <p className="text-sm font-semibold text-slate-900">Materials considered</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {visibleEvidence.length} candidate-visible evidence items, {visibleSources.length} public source cards, interview notes, and addendum status where available.
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <Paperclip className="mb-3 h-4 w-4 text-teal-700" />
+              <p className="text-sm font-semibold text-slate-900">Addendum boundary</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {addendum ? `Your addendum is ${addendum.status}. Sensitive context is handled as restricted review material.` : "No addendum was included in this feedback cycle."}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <ReceiptText className="mb-3 h-4 w-4 text-teal-700" />
+              <p className="text-sm font-semibold text-slate-900">Safety boundary</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                This is follow-up and practice feedback. It is not an automated hiring decision or guarantee of outcome.
+              </p>
+            </div>
+          </section>
         </div>
       )}
     </div>
   );
+}
+
+function isReleasedFeedbackStatus(status: string | undefined) {
+  return status === "draft_created" || status === "sent" || status === "released" || status === "approved";
 }

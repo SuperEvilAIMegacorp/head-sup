@@ -99,7 +99,7 @@ export function useAuth() {
 
 function fallbackUser(email: string): User {
   if (email === 'interviewee@demo.supwork.local') {
-    return { id: 'u_interviewee_maya', email, role: 'interviewee', name: 'Maya Tan' };
+    return { id: 'usr_candidate', email, role: 'interviewee', name: 'Nicholas Ting' };
   }
   if (email === 'hr@demo.supwork.local') {
     return { id: 'u_hr_alex', email, role: 'hr', name: 'Alex Lee' };

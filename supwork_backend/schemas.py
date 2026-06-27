@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Visibility = Literal["candidate_visible", "recruiter_internal", "interviewer_internal", "system_audit", "secret_redacted"]
 Role = Literal["interviewee", "hr", "interviewer", "hiring_manager", "admin"]
@@ -79,6 +79,35 @@ class AddendumRequest(BaseModel):
     addendumType: str = "clarification"
     body: str
     sensitiveFlag: bool = False
+    attachments: list["AddendumAttachmentMetadata"] = Field(default_factory=list)
+    links: list["AddendumLinkMetadata"] = Field(default_factory=list)
+
+
+class AddendumAttachmentMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = None
+    name: str | None = None
+    filename: str | None = None
+    contentType: str | None = None
+    sizeBytes: int | None = Field(default=None, ge=0)
+    storagePath: str | None = None
+    visibility: Visibility = "candidate_visible"
+
+
+class AddendumLinkMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = None
+    label: str | None = None
+    url: str
+    linkType: str = "supporting_link"
+    visibility: Visibility = "candidate_visible"
+
+
+class AddendumReviewRequest(BaseModel):
+    reviewNote: str | None = None
+    reviewStatus: Literal["acknowledged", "needs_follow_up", "incorporated", "closed"] = "acknowledged"
 
 
 class NotesRequest(BaseModel):
@@ -96,7 +125,28 @@ class RoundCompleteRequest(BaseModel):
     visibility: Visibility = "interviewer_internal"
 
 
+class RoundQuestionRequest(BaseModel):
+    force: bool = False
+
+
+class RoundTranscriptRequest(BaseModel):
+    transcriptText: str
+    sourceType: Literal["live", "talentflow_placeholder", "manual"] = "live"
+    provider: str = "manual"
+    visibility: Visibility = "interviewer_internal"
+
+
+class RoundReviewRequest(BaseModel):
+    summary: str = ""
+    outcome: Literal["advance", "needs_more_evidence", "hold", "finalize"] = "advance"
+
+
 class FeedbackReleaseApprovalRequest(BaseModel):
     channel: Literal["gmail"] = "gmail"
     actionType: str = "create_gmail_draft"
     riskLevel: str = "medium"
+    draftId: str | None = None
+    subject: str | None = None
+    editedBody: str | None = None
+    approvedBody: str | None = None
+    sourceMaterialSummary: str | None = None

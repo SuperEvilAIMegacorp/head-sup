@@ -3,7 +3,7 @@ import { Link, useLocation } from 'wouter';
 import {
   Globe2, CalendarCheck, LayoutDashboard,
   ScanSearch, MessagesSquare, Paperclip, Send,
-  FolderOpen, ShieldCheck, LogOut
+  FolderOpen, ShieldCheck, LogOut, ClipboardCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +24,7 @@ export function Sidebar({ mobile = false }: { mobile?: boolean }) {
     { href: '/interviewee/schedule',    label: 'Schedule',       icon: CalendarCheck   },
     { href: '/interviewee/addendum',    label: 'Addendum',       icon: Paperclip       },
     { href: '/interviewee/feedback',    label: 'Feedback',       icon: Send            },
+    { href: '/interviewee/data-consent', label: 'Data & Consent', icon: ClipboardCheck  },
   ];
 
   const hrLinks = [

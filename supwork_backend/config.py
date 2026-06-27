@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import AliasChoices
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,8 +22,12 @@ class Settings(BaseSettings):
 
     database_url: str = ""
     supabase_url: str = ""
-    supabase_service_role_key: str = ""
+    supabase_service_role_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"),
+    )
     supabase_jwt_secret: str = ""
+    supabase_jwks_url: str = ""
     supabase_storage_bucket: str = "supwork-artifacts"
     sqlite_database_path: Path = Field(default=Path(".local-data/supwork.sqlite"))
 

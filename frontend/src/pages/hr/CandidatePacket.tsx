@@ -1,26 +1,51 @@
+import { useState } from "react";
 import { useWorkflow } from "@/context/WorkflowContext";
-import { EvidenceCard } from "@/components/evidence/EvidenceCard";
+import { EvidenceTrailMatrix } from "@/components/evidence/EvidenceTrailMatrix";
 import { StatusChip } from "@/components/evidence/StatusChip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Mail, Calendar, EyeOff, CheckCircle2, Globe2, MessageSquare, ArrowRight } from "lucide-react";
+import { Mail, Calendar, EyeOff, CheckCircle2, Globe2, MessageSquare, ArrowRight, Loader2, UploadCloud } from "lucide-react";
 import { format } from "date-fns";
 import { useLocation } from "wouter";
+import { toast } from "sonner";
 
 export default function CandidatePacket() {
-  const { workflow, evidenceMappings, researchArtifacts, approvalRequests, addenda } = useWorkflow();
+  const { workflow, evidenceMappings, researchArtifacts, approvalRequests, addenda, interviewRounds, sourceArtifacts, uploadCvAnalysis } = useWorkflow();
   const [, setLocation] = useLocation();
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [isUploadingCv, setIsUploadingCv] = useState(false);
 
   const gaps = evidenceMappings.filter(mapping => mapping.status === 'gap' || mapping.status === 'partial' || mapping.status === 'unclear');
   const visibleToCandidate = evidenceMappings.filter(mapping => mapping.visibility === 'candidate-visible');
   const pendingSchedule = approvalRequests.find(request => request.type === 'scheduling' && request.status === 'pending');
   const pendingAddendum = addenda.find(addendum => addendum.status === 'pending');
+  const latestCv = sourceArtifacts.find(artifact => artifact.contentType === "application/pdf" || artifact.filename.toLowerCase().endsWith(".pdf"));
+  const cvFilename = latestCv?.filename ?? `${workflow.candidateName.replace(/[^a-z0-9]+/gi, "_")}_CV.pdf`;
+
+  const handleCvUpload = async () => {
+    if (!cvFile) {
+      toast.error("Choose a PDF CV first.");
+      return;
+    }
+    setIsUploadingCv(true);
+    try {
+      await uploadCvAnalysis(cvFile, `${workflow.jobTitle}, ${workflow.company}, ${workflow.region}`);
+      setCvFile(null);
+      toast.success("CV parsed and evidence refreshed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to parse CV.");
+    } finally {
+      setIsUploadingCv(false);
+    }
+  };
 
   return (
     <div className="flex min-h-[calc(100vh-44px)] flex-col lg:flex-row">
       <aside className="shrink-0 border-b border-slate-200 bg-slate-50 p-5 lg:w-80 lg:border-b-0 lg:border-r">
         <div className="flex items-center gap-4 lg:flex-col lg:text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-950 text-xl font-bold text-white">MT</div>
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-950 text-xl font-bold text-white">
+            {workflow.candidateName.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase()}
+          </div>
           <div>
             <h2 className="text-xl font-bold text-slate-950">{workflow.candidateName}</h2>
             <div className="mt-1 flex items-center gap-1.5 text-sm text-slate-500 lg:justify-center">
@@ -80,16 +105,40 @@ export default function CandidatePacket() {
             </Badge>
           </div>
 
-          <div className="space-y-4">
-            {evidenceMappings.map(mapping => (
-              <div key={mapping.id} className="relative">
-                {mapping.visibility === 'internal' && (
-                  <Badge variant="secondary" className="absolute -top-3 right-4 z-10 bg-violet-100 text-violet-800 border-violet-200">Internal only</Badge>
-                )}
-                <EvidenceCard mapping={mapping} isHRView />
+          <div className="mb-5 rounded-xl border border-teal-200 bg-teal-50 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-teal-950">Live CV parsing</h2>
+                <p className="mt-1 text-sm leading-6 text-teal-900">
+                  Upload a PDF to replace the placeholder TalentFlow CV extract with backend-parsed evidence and source labels.
+                </p>
+                <p className="mt-1 text-xs text-teal-700">
+                  Current source: {cvFilename}{latestCv?.parser ? ` via ${latestCv.parser}` : ""}
+                </p>
               </div>
-            ))}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="max-w-full rounded-md border border-teal-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  onChange={event => setCvFile(event.target.files?.[0] ?? null)}
+                />
+                <Button className="gap-2 bg-teal-700 hover:bg-teal-800" onClick={handleCvUpload} disabled={isUploadingCv}>
+                  {isUploadingCv ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                  Parse CV
+                </Button>
+              </div>
+            </div>
           </div>
+
+          <EvidenceTrailMatrix
+            addenda={addenda}
+            audience="hr"
+            candidateName={workflow.candidateName}
+            cvFilename={cvFilename}
+            mappings={evidenceMappings}
+            rounds={interviewRounds}
+          />
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">
@@ -126,7 +175,7 @@ export default function CandidatePacket() {
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-bold text-slate-950">Candidate-visible summary</h2>
-              <p className="mt-1 text-sm text-slate-500">This is the boundary of what Maya can inspect from her account.</p>
+              <p className="mt-1 text-sm text-slate-500">This is the boundary of what {workflow.candidateName} can inspect from their account.</p>
             </div>
             <Button variant="outline" className="gap-2" onClick={() => setLocation('/hr/plan')}>
               Open interview plan

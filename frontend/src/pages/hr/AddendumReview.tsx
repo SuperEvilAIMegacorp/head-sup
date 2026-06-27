@@ -21,7 +21,7 @@ export default function AddendumReview() {
     if (!pendingAddendum || !user) return;
     setIsAcknowledging(true);
     try {
-      await acknowledgeAddendum(pendingAddendum.id, user.name);
+      await acknowledgeAddendum(pendingAddendum.id, user.name, internalNote);
       toast.success("Addendum acknowledged successfully.");
     } catch (error) {
       toast.error("Failed to acknowledge addendum.");
@@ -87,6 +87,15 @@ export default function AddendumReview() {
                       <span className="text-xs text-muted-foreground">{file.size}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {pendingAddendum.reviewNote && (
+              <div className="space-y-3">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Persisted HR Review Note</h4>
+                <div className="p-4 bg-muted/20 border border-border rounded-lg text-sm whitespace-pre-wrap">
+                  {pendingAddendum.reviewNote}
                 </div>
               </div>
             )}

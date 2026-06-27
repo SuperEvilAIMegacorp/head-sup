@@ -19,6 +19,7 @@ This folder replaces the earlier single-document design. Each file is standalone
 | `07-safety-transparency-ethics.md`  | Humane transparency contract, feedback rules, approval matrix, privacy, and misuse prevention.            |
 | `08-hosting-demo-delivery.md`       | Hosted demo plan, environment setup, fallback strategy, golden path, preflight, and submission assets.    |
 | `09-implementation-roadmap.md`      | Build phases, workstream split, tests, acceptance criteria, risks, and open decisions.                    |
+| `10-feature-recovery-plan.md`       | TalentFlow IQ recovery backlog, sup'work fixes, data/API gaps, and implementation workstreams.           |
 
 ## North Star
 

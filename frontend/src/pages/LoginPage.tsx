@@ -14,7 +14,7 @@ const DEMO_ACCOUNTS = {
   interviewee: {
     email: 'interviewee@demo.supwork.local',
     label: 'Interviewee account',
-    name: 'Maya Tan',
+    name: 'Nicholas Ting',
     lands: '/interviewee',
     description: 'Evidence, schedule, addendum, feedback, and receipts.',
   },
@@ -119,7 +119,7 @@ export default function LoginPage() {
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Shared demo journey</p>
-                <p className="mt-1 text-sm font-semibold text-white">Maya Tan - AI Solutions Engineer at Example AI</p>
+                <p className="mt-1 text-sm font-semibold text-white">Nicholas Ting - AI Solutions Engineer at Example AI</p>
               </div>
               <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[11px] font-medium text-amber-100">
                 schedule pending approval

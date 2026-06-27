@@ -6,12 +6,14 @@ import { useLocation } from "wouter";
 import { format } from "date-fns";
 
 export default function Pipeline() {
-  const { workflow, approvalRequests, interviewRounds, addenda, researchArtifacts } = useWorkflow();
+  const { workflow, approvalRequests, interviewRounds, addenda, researchArtifacts, timelineEvents, syncState } = useWorkflow();
   const [, setLocation] = useLocation();
 
   const pendingApprovals = approvalRequests.filter(request => request.status === 'pending');
-  const activeRound = interviewRounds[0];
+  const activeRound = interviewRounds.find(round => round.status === 'scheduled') ?? interviewRounds[0];
   const pendingAddenda = addenda.filter(addendum => addendum.status === 'pending');
+  const candidateVisibleReceipts = timelineEvents.filter(event => event.candidateVisible).length;
+  const stage = normalizeStage(workflow.stage);
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
@@ -36,7 +38,7 @@ export default function Pipeline() {
           { label: 'Pending approvals', value: pendingApprovals.length, icon: AlertTriangle, tone: 'text-amber-700 bg-amber-50 border-amber-200' },
           { label: 'Research sources', value: researchArtifacts.length, icon: Globe2, tone: 'text-teal-700 bg-teal-50 border-teal-200' },
           { label: 'Addenda awaiting review', value: pendingAddenda.length, icon: Paperclip, tone: 'text-violet-700 bg-violet-50 border-violet-200' },
-          { label: 'Candidate-visible receipts', value: 5 + addenda.length, icon: ShieldCheck, tone: 'text-slate-700 bg-slate-50 border-slate-200' },
+          { label: 'Candidate-visible receipts', value: candidateVisibleReceipts, icon: ShieldCheck, tone: 'text-slate-700 bg-slate-50 border-slate-200' },
         ].map(({ label, value, icon: Icon, tone }) => (
           <div key={label} className={`rounded-xl border p-4 ${tone}`}>
             <Icon className="mb-3 h-5 w-5" />
@@ -50,7 +52,9 @@ export default function Pipeline() {
         <button type="button" className="block w-full p-5 text-left" onClick={() => setLocation('/hr/packet')}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-950 text-lg font-bold text-white">MT</div>
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-950 text-lg font-bold text-white">
+                {workflow.candidateName.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase()}
+              </div>
               <div>
                 <h2 className="text-xl font-bold text-slate-950">{workflow.candidateName}</h2>
                 <p className="mt-1 text-sm text-slate-500">{workflow.candidateEmail} - {workflow.jobTitle}</p>
@@ -59,11 +63,14 @@ export default function Pipeline() {
             <div className="grid gap-4 sm:grid-cols-3 lg:w-[520px]">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Stage</p>
-                <div className="mt-1"><StatusChip status={workflow.stage === 'interview_scheduled' ? 'scheduled' : 'pending'} /></div>
+                <div className="mt-1 flex flex-col items-start gap-1">
+                  <StatusChip status={stage.chip} />
+                  <span className="text-xs font-medium text-slate-500">{stage.label}</span>
+                </div>
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Next interview</p>
-                <p className="mt-1 text-sm font-semibold text-slate-800">{format(new Date(activeRound.dateTime), 'MMM d, h:mm a')}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-800">{formatRoundTime(activeRound?.dateTime)}</p>
               </div>
               <div className="flex items-center justify-end">
                 <span className="inline-flex items-center gap-1 text-sm font-semibold text-teal-700">
@@ -94,9 +101,9 @@ export default function Pipeline() {
 
       <section className="grid gap-4 md:grid-cols-3">
         {[
-          { label: 'Exa research', detail: 'Cached source cards ready', icon: Globe2 },
-          { label: 'Google Calendar / Meet', detail: pendingApprovals.length ? 'Waiting for approval' : 'Fixture event created', icon: Video },
-          { label: 'Gmail / automation', detail: 'Draft approval available after feedback', icon: Mail },
+          { label: 'Exa research', detail: `${researchArtifacts.length} source cards from ${syncState.dataSource}`, icon: Globe2 },
+          { label: 'Google Calendar / Meet', detail: pendingApprovals.length ? 'Waiting for approval' : stage.chip === 'scheduled' ? 'Interview scheduled' : 'Ready for approval', icon: Video },
+          { label: 'Gmail / automation', detail: `Follow-up path is ${workflow.providerMode ?? 'fixture'} / backend mediated`, icon: Mail },
         ].map(({ label, detail, icon: Icon }) => (
           <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <Icon className="mb-3 h-5 w-5 text-slate-400" />
@@ -107,4 +114,24 @@ export default function Pipeline() {
       </section>
     </div>
   );
+}
+
+function normalizeStage(stage: string): { chip: 'pending' | 'approved' | 'scheduled'; label: string } {
+  if (stage === 'scheduled' || stage === 'interview_scheduled') {
+    return { chip: 'scheduled', label: 'Interview scheduled' };
+  }
+  if (stage === 'interview_completed' || stage === 'interview_complete' || stage === 'follow_up_sent') {
+    return { chip: 'approved', label: humanizeStage(stage) };
+  }
+  return { chip: 'pending', label: humanizeStage(stage) };
+}
+
+function humanizeStage(stage: string) {
+  return stage.replaceAll('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function formatRoundTime(value?: string) {
+  if (!value) return 'Not scheduled';
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? format(date, 'MMM d, h:mm a') : 'Not scheduled';
 }

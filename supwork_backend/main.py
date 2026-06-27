@@ -4,17 +4,19 @@ import argparse
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from supwork_backend.config import Settings, get_settings
 from supwork_backend.exa_client import ExaClient
 from supwork_backend.google_clients import GoogleClients, GoogleProviderNotConfigured
 from supwork_backend.model_provider import ModelProvider
+from supwork_backend.pdf_parser import PdfParseError, parse_cv_pdf
 from supwork_backend.provider_status import provider_status
 from supwork_backend.safety import assert_candidate_safe, candidate_safe_check
 from supwork_backend.schemas import (
     AddendumRequest,
+    AddendumReviewRequest,
     ApprovalCreateRequest,
     ApprovalDecisionResponse,
     FeedbackReleaseApprovalRequest,
@@ -25,6 +27,9 @@ from supwork_backend.schemas import (
     LoginResponse,
     NotesRequest,
     RoundCompleteRequest,
+    RoundQuestionRequest,
+    RoundReviewRequest,
+    RoundTranscriptRequest,
     ResearchRequest,
 )
 from supwork_backend.store import ForbiddenError, InMemoryStore, NotFoundError, SQLiteStore
@@ -191,6 +196,23 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
         view = candidate_workflow(workflow_id, actor)
         return {"workflowId": workflow_id, "schedule": view["schedule"]}
 
+    @app.get("/api/candidate/workflows/{workflow_id}/rounds")
+    def candidate_rounds(workflow_id: str, actor: dict[str, Any] = Depends(current_actor)) -> dict[str, Any]:
+        try:
+            view = candidate_workflow(workflow_id, actor)
+            return {"workflowId": workflow_id, "rounds": view["rounds"]}
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.get("/api/candidate/workflows/{workflow_id}/rounds/{round_id}")
+    def candidate_round(workflow_id: str, round_id: str, actor: dict[str, Any] = Depends(current_actor)) -> dict[str, Any]:
+        try:
+            if actor["role"] == "interviewee":
+                store.candidate_view(workflow_id, actor)
+            return store.round(workflow_id, round_id, actor_role="interviewee")
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
     @app.get("/api/recruiter/workflows")
     def recruiter_workflows(actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         return {"workflowIds": store.workflow_ids_for_actor(actor)}
@@ -202,11 +224,55 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
         except Exception as exc:
             raise handle_error(exc) from exc
 
+    @app.get("/api/recruiter/workflows/{workflow_id}/rounds")
+    def recruiter_rounds(workflow_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        try:
+            return {"workflowId": workflow_id, "rounds": store.rounds(workflow_id, actor_role=actor["role"])}
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.get("/api/recruiter/workflows/{workflow_id}/rounds/{round_id}")
+    def recruiter_round(workflow_id: str, round_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        try:
+            return store.round(workflow_id, round_id, actor_role=actor["role"])
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
     @app.post("/api/recruiter/workflows/{workflow_id}/analyze-evidence")
     def analyze_evidence(workflow_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         try:
-            provider_mode = settings.model_provider if settings.supwork_provider == "live" else "mock"
+            provider_mode = settings.model_provider
             return store.analyze_evidence(workflow_id, actor, provider_mode)
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/cv/upload-analysis")
+    async def upload_cv_analysis(
+        workflow_id: str,
+        file: UploadFile = File(...),
+        jobScopeText: str = Form(default=""),
+        actor: dict[str, Any] = Depends(require_recruiter),
+    ) -> dict[str, Any]:
+        try:
+            filename = file.filename or "candidate_cv.pdf"
+            if not filename.lower().endswith(".pdf") and file.content_type != "application/pdf":
+                raise ValueError("CV upload must be a PDF")
+            content = await file.read()
+            artifact = parse_cv_pdf(filename, content)
+            view = store.recruiter_view(workflow_id)
+            if jobScopeText.strip():
+                view["role"]["jobScopeText"] = jobScopeText.strip()
+            analysis = model.cv_evidence_analysis(view, artifact)
+            return store.save_cv_analysis(
+                workflow_id,
+                actor,
+                artifact,
+                analysis,
+                settings.model_provider,
+                jobScopeText,
+            )
+        except PdfParseError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         except Exception as exc:
             raise handle_error(exc) from exc
 
@@ -241,9 +307,26 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     @app.post("/api/recruiter/workflows/{workflow_id}/questions")
     def generate_questions(workflow_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         try:
+            active_round = store.active_round(workflow_id)
             view = store.recruiter_view(workflow_id)
+            view["activeRound"] = store.round(workflow_id, active_round["id"], actor_role=actor["role"])
             plan = model.interview_plan(view, view["evidenceMappings"])
-            return store.save_interview_plan(workflow_id, plan)
+            return store.save_round_interview_plan(workflow_id, active_round["id"], plan, actor)
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/rounds/{round_id}/questions")
+    def generate_round_questions(
+        workflow_id: str,
+        round_id: str,
+        request: RoundQuestionRequest | None = None,
+        actor: dict[str, Any] = Depends(require_recruiter),
+    ) -> dict[str, Any]:
+        try:
+            view = store.recruiter_view(workflow_id)
+            view["activeRound"] = store.round(workflow_id, round_id, actor_role=actor["role"])
+            plan = model.interview_plan(view, view["evidenceMappings"])
+            return store.save_round_interview_plan(workflow_id, round_id, plan, actor)
         except Exception as exc:
             raise handle_error(exc) from exc
 
@@ -258,6 +341,33 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     def complete_round(workflow_id: str, round_id: str, request: RoundCompleteRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         try:
             return store.complete_round(workflow_id, round_id, request.notes, request.visibility, actor)
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/rounds/{round_id}/transcript")
+    def store_round_transcript(
+        workflow_id: str,
+        round_id: str,
+        request: RoundTranscriptRequest,
+        actor: dict[str, Any] = Depends(require_recruiter),
+    ) -> dict[str, Any]:
+        try:
+            return store.save_round_transcript(
+                workflow_id,
+                round_id,
+                request.transcriptText,
+                request.sourceType,
+                request.provider,
+                request.visibility,
+                actor,
+            )
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/rounds/{round_id}/review")
+    def review_round(workflow_id: str, round_id: str, request: RoundReviewRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        try:
+            return store.review_round(workflow_id, round_id, request.summary, request.outcome, actor)
         except Exception as exc:
             raise handle_error(exc) from exc
 
@@ -278,20 +388,43 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     def feedback_release_approval(workflow_id: str, request: FeedbackReleaseApprovalRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         try:
             draft = store.latest_feedback_draft(workflow_id)
+            if request.draftId and request.draftId != draft["id"]:
+                matches = [item for item in store.recruiter_view(workflow_id)["draftHistory"] if item["id"] == request.draftId]
+                if not matches:
+                    raise NotFoundError(request.draftId)
+                draft = matches[0]
+            subject = request.subject or draft["subject"]
+            approved_body = request.approvedBody or request.editedBody or draft["body"]
+            safety = candidate_safe_check(f"{subject}\n{approved_body}")
+            if not safety["passed"]:
+                raise ForbiddenError(f"Candidate-facing feedback failed safety check: {', '.join(safety['findings'])}")
+            prepared_draft = store.prepare_feedback_release(
+                workflow_id,
+                draft["id"],
+                subject,
+                approved_body,
+                safety,
+                actor,
+                request.sourceMaterialSummary,
+                request.channel,
+            )
             approval = store.create_approval(
                 workflow_id,
                 request.actionType,
                 {
                     "channel": request.channel,
-                    "draftId": draft["id"],
-                    "subject": draft["subject"],
+                    "draftId": prepared_draft["id"],
+                    "draftVersionId": prepared_draft["currentVersionId"],
+                    "subject": prepared_draft["subject"],
+                    "approvedBody": prepared_draft["approvedBody"],
+                    "sourceMaterialSummary": request.sourceMaterialSummary,
                     "candidateFacing": True,
                 },
                 request.riskLevel,
                 request.channel,
                 actor,
             )
-            linked_draft = store.link_draft_approval(draft["id"], approval["id"])
+            linked_draft = store.link_draft_approval(prepared_draft["id"], approval["id"])
             return {"approval": approval, "draft": linked_draft}
         except Exception as exc:
             raise handle_error(exc) from exc
@@ -369,10 +502,17 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
             safety = candidate_safe_check(f"{request.subject}\n{request.body}")
             if not safety["passed"]:
                 raise ForbiddenError(f"Candidate-facing email failed safety check: {', '.join(safety['findings'])}")
-            store.require_approved(request.approvalId, request.workflowId, {"create_gmail_draft", "send_candidate_follow_up"})
+            approval = store.require_approved(request.approvalId, request.workflowId, {"create_gmail_draft", "send_candidate_follow_up"})
+            approved_subject = approval.get("proposedPayload", {}).get("subject")
+            approved_body = approval.get("proposedPayload", {}).get("approvedBody")
+            if approved_subject and request.subject != approved_subject:
+                raise ForbiddenError("Gmail subject must match the approved feedback subject")
+            if approved_body and request.body != approved_body:
+                raise ForbiddenError("Gmail body must match the approved feedback body")
             live = settings.supwork_provider == "live" and settings.google_configured and bool(settings.gmail_sender_email)
             result = google.create_gmail_draft(request.model_dump(), live=live, send=send)
             result["approvedBody"] = request.body
+            result["sourceMaterialSummary"] = approval.get("proposedPayload", {}).get("sourceMaterialSummary")
             draft = store.save_gmail_result(request.workflowId, request.approvalId, result)
             return {"draft": draft, "providerResult": result}
         except GoogleProviderNotConfigured as exc:
@@ -383,7 +523,16 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     @app.post("/api/candidate/workflows/{workflow_id}/rounds/{round_id}/addendum")
     def submit_addendum(workflow_id: str, round_id: str, request: AddendumRequest, actor: dict[str, Any] = Depends(current_actor)) -> dict[str, Any]:
         try:
-            return store.submit_addendum(workflow_id, round_id, request.body, request.addendumType, request.sensitiveFlag, actor)
+            return store.submit_addendum(
+                workflow_id,
+                round_id,
+                request.body,
+                request.addendumType,
+                request.sensitiveFlag,
+                actor,
+                [item.model_dump() for item in request.attachments],
+                [item.model_dump() for item in request.links],
+            )
         except Exception as exc:
             raise handle_error(exc) from exc
 
@@ -395,9 +544,15 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
             raise handle_error(exc) from exc
 
     @app.post("/api/recruiter/workflows/{workflow_id}/addenda/{addendum_id}/acknowledge")
-    def acknowledge_addendum(workflow_id: str, addendum_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+    def acknowledge_addendum(
+        workflow_id: str,
+        addendum_id: str,
+        request: AddendumReviewRequest | None = None,
+        actor: dict[str, Any] = Depends(require_recruiter),
+    ) -> dict[str, Any]:
         try:
-            return store.acknowledge_addendum(workflow_id, addendum_id, actor)
+            review = request or AddendumReviewRequest()
+            return store.acknowledge_addendum(workflow_id, addendum_id, actor, review.reviewNote, review.reviewStatus)
         except Exception as exc:
             raise handle_error(exc) from exc
 
