@@ -107,6 +107,26 @@ class BackendWorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("failed safety check", response.text)
 
+    def test_analyze_evidence_populates_agent_filled_fields_and_trace(self) -> None:
+        response = self.client.post(
+            "/api/recruiter/workflows/wf_demo/analyze-evidence",
+            headers=self._headers(self.hr_token),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["dataSource"], "backend_generated")
+        self.assertEqual(body["providerMode"], "mock")
+        self.assertTrue(body["roleBrief"]["rubricTags"])
+        self.assertTrue(body["traceId"].startswith("trc_"))
+
+        recruiter_view = self.client.get("/api/recruiter/workflows/wf_demo", headers=self._headers(self.hr_token))
+        self.assertEqual(recruiter_view.status_code, 200, recruiter_view.text)
+        self.assertEqual(recruiter_view.json()["agentFilledFields"]["traceId"], body["traceId"])
+
+        trace = self.client.get("/api/workflows/wf_demo/agent-trace", headers=self._headers(self.hr_token))
+        self.assertEqual(trace.status_code, 200, trace.text)
+        self.assertTrue(any(run["agentName"] == "supwork-evidence-agent" for run in trace.json()["agentRuns"]))
+
     def _schedule_payload(self, approval_id: str) -> dict:
         start = datetime.now(timezone.utc) + timedelta(days=2)
         return {

@@ -89,3 +89,14 @@ class NotesRequest(BaseModel):
 class FeedbackDraftRequest(BaseModel):
     includeAddenda: bool = True
     nextStep: str = "Recruiter review"
+
+
+class RoundCompleteRequest(BaseModel):
+    notes: str = ""
+    visibility: Visibility = "interviewer_internal"
+
+
+class FeedbackReleaseApprovalRequest(BaseModel):
+    channel: Literal["gmail"] = "gmail"
+    actionType: str = "create_gmail_draft"
+    riskLevel: str = "medium"

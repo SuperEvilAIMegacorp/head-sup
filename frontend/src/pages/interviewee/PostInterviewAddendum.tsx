@@ -21,8 +21,7 @@ export default function PostInterviewAddendum() {
   const isInterviewComplete = interviewRounds.some(r => r.status === 'complete');
   const existingAddendum = addenda[0];
 
-  // For demo: allow if scheduled or complete
-  const canSubmit = interviewRounds.some(r => r.status === 'scheduled' || r.status === 'complete');
+  const canSubmit = isInterviewComplete;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -77,15 +77,16 @@ class FakeEndToEndWorkflowTests(unittest.TestCase):
         self.assertEqual(candidate_schedule.status_code, 200, candidate_schedule.text)
         self.assertEqual(candidate_schedule.json()["schedule"]["roundId"], round_id)
 
-        notes = self.client.post(
-            "/api/recruiter/workflows/wf_demo/notes",
+        completed = self.client.post(
+            f"/api/recruiter/workflows/wf_demo/rounds/{round_id}/complete",
             headers=self.hr_headers,
             json={
                 "notes": "Candidate gave a clear deployment example; validate post-launch ownership.",
                 "visibility": "interviewer_internal",
             },
         )
-        self.assertEqual(notes.status_code, 200, notes.text)
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.assertEqual(completed.json()["round"]["roundStatus"], "complete")
 
         addendum = self.client.post(
             f"/api/candidate/workflows/wf_demo/rounds/{round_id}/addendum",

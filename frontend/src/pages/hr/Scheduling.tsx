@@ -8,10 +8,13 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 
 export default function Scheduling() {
-  const { approvalRequests, approveScheduling } = useWorkflow();
+  const { approvalRequests, approveScheduling, completeInterviewRound, interviewRounds } = useWorkflow();
   const [isApproving, setIsApproving] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   const pendingRequest = approvalRequests.find(r => r.type === 'scheduling');
+  const primaryRound = interviewRounds[0];
+  const isRoundComplete = primaryRound?.status === 'complete';
 
   const handleApprove = async () => {
     if (!pendingRequest) return;
@@ -23,6 +26,22 @@ export default function Scheduling() {
       toast.error("Failed to schedule interview.");
     } finally {
       setIsApproving(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!primaryRound) return;
+    setIsCompleting(true);
+    try {
+      await completeInterviewRound(
+        primaryRound.id,
+        "Candidate gave a clear deployment example; validate post-launch ownership and stakeholder communication in follow-up.",
+      );
+      toast.success("Interview marked complete. Candidate addendum window is open.");
+    } catch (error) {
+      toast.error("Failed to mark interview complete.");
+    } finally {
+      setIsCompleting(false);
     }
   };
 
@@ -137,23 +156,36 @@ export default function Scheduling() {
           <CardFooter className="bg-muted/10 border-t border-border p-6 flex flex-col sm:flex-row justify-between items-center gap-4">
             {pendingRequest.status === 'approved' ? (
                <p className="text-sm font-medium text-green-600 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" /> Added to audit log and sent to candidate
+                  <CheckCircle2 className="h-4 w-4" /> {isRoundComplete ? 'Interview complete; addendum window open' : 'Added to audit log and sent to candidate'}
                </p>
             ) : (
                <p className="text-sm text-muted-foreground">
                   Approving sends this approved payload to the backend integration route. Internal-only fields stay excluded.
                </p>
             )}
-            <Button 
-              onClick={handleApprove} 
-              disabled={isApproving || pendingRequest.status !== 'pending'}
-              className="w-full sm:w-auto min-w-[200px] h-12 text-base"
-              size="lg"
-            >
-              {isApproving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
-              {!isApproving && pendingRequest.status === 'pending' ? 'Approve & Schedule' : ''}
-              {!isApproving && pendingRequest.status === 'approved' ? <><CheckCircle2 className="mr-2 h-5 w-5" /> Scheduled</> : ''}
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <Button 
+                onClick={handleApprove} 
+                disabled={isApproving || pendingRequest.status !== 'pending'}
+                className="w-full sm:w-auto min-w-[200px] h-12 text-base"
+                size="lg"
+              >
+                {isApproving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
+                {!isApproving && pendingRequest.status === 'pending' ? 'Approve & Schedule' : ''}
+                {!isApproving && pendingRequest.status === 'approved' ? <><CheckCircle2 className="mr-2 h-5 w-5" /> Scheduled</> : ''}
+              </Button>
+              {pendingRequest.status === 'approved' && !isRoundComplete ? (
+                <Button
+                  onClick={handleComplete}
+                  disabled={isCompleting}
+                  className="h-12"
+                  variant="outline"
+                >
+                  {isCompleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  Mark Complete
+                </Button>
+              ) : null}
+            </div>
           </CardFooter>
         </Card>
       )}

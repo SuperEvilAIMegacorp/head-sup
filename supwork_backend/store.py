@@ -23,6 +23,13 @@ class InMemoryStore:
         self._lock = threading.RLock()
         self._state = demo_state()
 
+    def reset_demo(self, keep_tokens: bool = True) -> dict[str, Any]:
+        with self._lock:
+            tokens = deepcopy(self._state.get("tokens", {})) if keep_tokens else {}
+            self._state = demo_state()
+            self._state["tokens"] = tokens
+            return {"status": "reset", "workflowIds": list(self._state["workflows"].keys())}
+
     def login(self, email: str, password: str, expected_password: str) -> dict[str, Any]:
         with self._lock:
             user = next((u for u in self._state["users"].values() if u["email"].lower() == email.lower()), None)
@@ -63,6 +70,7 @@ class InMemoryStore:
                 "candidate": {"name": candidate["displayName"], "email": candidate["email"]},
                 "role": role,
                 "stage": workflow["stage"],
+                "providerMode": workflow.get("providerMode", "mock"),
                 "statusSummary": workflow["statusSummary"],
                 "timeline": self.timeline(workflow_id, candidate_visible=True),
                 "evidenceSummary": [
@@ -71,6 +79,7 @@ class InMemoryStore:
                     if item["workflowId"] == workflow_id and item["visibility"] == "candidate_visible"
                 ],
                 "roleBrief": self.candidate_research(workflow_id),
+                "agentFilledFields": deepcopy(self._state.get("agentFilledFields", {}).get(workflow_id)),
                 "schedule": self.schedule(workflow_id, candidate_visible=True),
                 "interviewPrep": deepcopy(self._state["interviewPlans"].get(workflow_id, {})).get("candidatePrepThemes", []),
                 "submittedAddenda": self.addenda(workflow_id, actor_role="interviewee"),
@@ -88,16 +97,78 @@ class InMemoryStore:
                 "candidate": {"name": candidate["displayName"], "email": candidate["email"]},
                 "role": role,
                 "stage": workflow["stage"],
+                "providerMode": workflow.get("providerMode", "mock"),
                 "statusSummary": workflow["statusSummary"],
                 "evidenceMappings": [deepcopy(item) for item in self._state["evidenceMappings"] if item["workflowId"] == workflow_id],
                 "researchArtifacts": self.research(workflow_id),
                 "interviewPlan": deepcopy(self._state["interviewPlans"].get(workflow_id)),
+                "agentFilledFields": deepcopy(self._state.get("agentFilledFields", {}).get(workflow_id)),
+                "schedule": self.schedule(workflow_id, candidate_visible=False),
                 "candidateAddenda": self.addenda(workflow_id, actor_role="hr"),
                 "approvals": [deepcopy(a) for a in self._state["approvalRequests"].values() if a["workflowId"] == workflow_id],
                 "draftHistory": [deepcopy(d) for d in self._state["communicationDrafts"].values() if d["workflowId"] == workflow_id],
                 "integrationEvents": [deepcopy(e) for e in self._state["integrationEvents"] if e["workflowId"] == workflow_id],
                 "auditEvents": self.timeline(workflow_id, candidate_visible=False),
             }
+
+    def analyze_evidence(self, workflow_id: str, actor: dict[str, Any], provider_mode: str = "mock") -> dict[str, Any]:
+        with self._lock:
+            workflow = self.workflow(workflow_id)
+            role = self._state["roles"][workflow["roleId"]]
+            evidence = [deepcopy(item) for item in self._state["evidenceMappings"] if item["workflowId"] == workflow_id]
+            gaps = [item for item in evidence if item.get("status") in {"partial", "gap", "unclear"}]
+            trace_id = f"trc_{uuid4().hex[:10]}"
+            job_scope = role.get("jobScopeText", "")
+            rubric_tags = [part.strip() for part in job_scope.split(",") if part.strip()]
+            agent_filled = {
+                "workflowId": workflow_id,
+                "traceId": trace_id,
+                "providerMode": provider_mode,
+                "dataSource": "backend_generated",
+                "generatedAt": utc_now_iso(),
+                "roleBrief": {
+                    "jobPoints": [
+                        "Customer-facing AI deployment with clear rollout ownership.",
+                        "Hands-on Python/API implementation plus LLM evaluation habits.",
+                        "Stakeholder communication across technical and business teams.",
+                    ],
+                    "rubricTags": rubric_tags,
+                    "interviewFocus": [item["requirement"] for item in gaps[:4]],
+                    "source": "role_scope_and_cv_evidence",
+                },
+                "evidenceMappings": evidence,
+                "nextHumanAction": "review_evidence_and_generate_interview_plan" if gaps else "approve_schedule_interview",
+                "requiresHumanApproval": True,
+            }
+            self._state.setdefault("agentFilledFields", {})[workflow_id] = agent_filled
+            workflow["providerMode"] = provider_mode
+            workflow["statusSummary"] = "Evidence mapped by the backend; recruiter can review source-backed gaps and generate the interview plan."
+            self.set_stage(workflow_id, "evidence_mapped")
+            self.record_agent_run(
+                workflow_id=workflow_id,
+                trace_id=trace_id,
+                agent_name="supwork-evidence-agent",
+                mode="analyze_evidence",
+                provider=provider_mode,
+                input_summary="Map CV evidence to role requirements.",
+                output_summary={
+                    "evidenceCount": len(evidence),
+                    "gapCount": len(gaps),
+                    "nextHumanAction": agent_filled["nextHumanAction"],
+                },
+                status="completed",
+            )
+            self.audit(
+                workflow_id,
+                "agent.evidence.completed",
+                "system",
+                "supwork-evidence-agent",
+                "Evidence analysis refreshed and stored as agent-filled fields.",
+                {"traceId": trace_id, "gapCount": len(gaps)},
+                "candidate_visible",
+                trace_id,
+            )
+            return deepcopy(agent_filled)
 
     def research(self, workflow_id: str) -> list[dict[str, Any]]:
         return [deepcopy(r) for r in self._state["researchArtifacts"] if r["workflowId"] == workflow_id]
@@ -115,7 +186,18 @@ class InMemoryStore:
             artifact = deepcopy(artifact)
             artifact.setdefault("id", f"rs_{uuid4().hex[:10]}")
             self._state["researchArtifacts"].append(artifact)
-            self.audit(artifact["workflowId"], "agent.research.completed", "system", "research", "Research artifact stored.", {"researchId": artifact["id"]}, "recruiter_internal")
+            trace_id = f"trc_{uuid4().hex[:10]}"
+            self.record_agent_run(
+                workflow_id=artifact["workflowId"],
+                trace_id=trace_id,
+                agent_name="supwork-research-agent",
+                mode=f"research_{artifact.get('researchType', 'company')}",
+                provider=str(artifact.get("provider", "fixture")),
+                input_summary=str(artifact.get("query", "public role/company research")),
+                output_summary={"researchId": artifact["id"], "sourceCount": len(artifact.get("sources", []))},
+                status="completed",
+            )
+            self.audit(artifact["workflowId"], "agent.research.completed", "system", "research", "Research artifact stored.", {"researchId": artifact["id"]}, "recruiter_internal", trace_id)
             return deepcopy(artifact)
 
     def interview_plan(self, workflow_id: str) -> dict[str, Any]:
@@ -131,7 +213,18 @@ class InMemoryStore:
             plan["workflowId"] = workflow_id
             self._state["interviewPlans"][workflow_id] = plan
             self.set_stage(workflow_id, "interview_planning")
-            self.audit(workflow_id, "agent.questions.generated", "system", "model", "Interview plan generated.", {"planId": plan["id"]}, "recruiter_internal")
+            trace_id = f"trc_{uuid4().hex[:10]}"
+            self.record_agent_run(
+                workflow_id=workflow_id,
+                trace_id=trace_id,
+                agent_name="supwork-question-agent",
+                mode="generate_interview_plan",
+                provider=plan.get("provider", "model-or-fixture"),
+                input_summary="Generate interview questions from evidence gaps.",
+                output_summary={"planId": plan["id"], "questionCount": len(plan.get("questions", []))},
+                status="completed",
+            )
+            self.audit(workflow_id, "agent.questions.generated", "system", "model", "Interview plan generated.", {"planId": plan["id"]}, "recruiter_internal", trace_id)
             return deepcopy(plan)
 
     def create_approval(self, workflow_id: str, action_type: str, payload: dict[str, Any], risk_level: str, provider: str, actor: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +353,40 @@ class InMemoryStore:
             self.audit(workflow_id, "artifact.uploaded.notes", "user", actor["id"], "Interview notes added.", {"artifactId": artifact["id"]}, "recruiter_internal")
             return deepcopy(artifact)
 
+    def complete_round(self, workflow_id: str, round_id: str, notes: str, visibility: str, actor: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            round_record = self._state["interviewRounds"].get(round_id)
+            if not round_record or round_record["workflowId"] != workflow_id:
+                raise NotFoundError(round_id)
+            notes_artifact = self.add_notes(workflow_id, notes, visibility, actor) if notes.strip() else None
+            round_record["roundStatus"] = "complete"
+            round_record["notesStatus"] = "added" if notes_artifact else "pending"
+            round_record["updatedAt"] = utc_now_iso()
+            self.set_stage(workflow_id, "interview_completed")
+            trace_id = f"trc_{uuid4().hex[:10]}"
+            self.audit(
+                workflow_id,
+                "interview.round.completed",
+                "user",
+                actor["id"],
+                "Interview round marked complete; candidate addendum window is open.",
+                {"roundId": round_id, "notesArtifactId": notes_artifact["id"] if notes_artifact else None},
+                "candidate_visible",
+                trace_id,
+            )
+            self._state["candidateReceipts"].append(
+                {
+                    "id": f"rcp_{uuid4().hex[:10]}",
+                    "workflowId": workflow_id,
+                    "receiptType": "addendum_window_open",
+                    "summary": "The interview round is complete. You may add optional context before HR finalizes next steps.",
+                    "sharedArtifacts": [],
+                    "externalActions": [],
+                    "createdAt": utc_now_iso(),
+                }
+            )
+            return {"round": deepcopy(round_record), "notes": deepcopy(notes_artifact)}
+
     def submit_addendum(self, workflow_id: str, round_id: str, body: str, addendum_type: str, sensitive: bool, actor: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             workflow = self.workflow(workflow_id)
@@ -356,8 +483,33 @@ class InMemoryStore:
             }
             self._state["communicationDrafts"][draft_id] = draft
             self.set_stage(workflow_id, "follow_up_pending_approval")
-            self.audit(workflow_id, "agent.feedback.generated", "user", actor["id"], "Candidate-safe feedback draft generated.", {"draftId": draft_id}, "recruiter_internal")
+            trace_id = f"trc_{uuid4().hex[:10]}"
+            self.record_agent_run(
+                workflow_id=workflow_id,
+                trace_id=trace_id,
+                agent_name="supwork-feedback-agent",
+                mode="generate_candidate_safe_feedback",
+                provider="model-or-fixture",
+                input_summary="Generate candidate-safe follow-up draft.",
+                output_summary={"draftId": draft_id, "safetyPassed": safety["passed"]},
+                status="completed",
+            )
+            self.audit(workflow_id, "agent.feedback.generated", "user", actor["id"], "Candidate-safe feedback draft generated.", {"draftId": draft_id}, "recruiter_internal", trace_id)
             return deepcopy(draft)
+
+    def latest_feedback_draft(self, workflow_id: str) -> dict[str, Any]:
+        drafts = [d for d in self._state["communicationDrafts"].values() if d["workflowId"] == workflow_id and d["status"] == "drafted"]
+        if not drafts:
+            raise NotFoundError("No feedback draft available for approval")
+        return deepcopy(sorted(drafts, key=lambda d: d["createdAt"])[-1])
+
+    def link_draft_approval(self, draft_id: str, approval_id: str) -> dict[str, Any]:
+        draft = self._state["communicationDrafts"].get(draft_id)
+        if not draft:
+            raise NotFoundError(draft_id)
+        draft["approvalId"] = approval_id
+        draft["updatedAt"] = utc_now_iso()
+        return deepcopy(draft)
 
     def approved_feedback(self, workflow_id: str) -> dict[str, Any] | None:
         drafts = [d for d in self._state["communicationDrafts"].values() if d["workflowId"] == workflow_id and d["status"] in {"draft_created", "sent", "released"}]
@@ -375,7 +527,7 @@ class InMemoryStore:
                 "channel": "gmail",
                 "currentVersionId": None,
                 "subject": result.get("subject"),
-                "body": result.get("bodySummary", "Candidate-safe message approved."),
+                "body": result.get("approvedBody") or result.get("bodySummary", "Candidate-safe message approved."),
                 "visibilityCheckStatus": "passed",
                 "approvalId": approval_id,
                 "externalMessageId": result.get("messageId") or result.get("draftId"),
@@ -386,9 +538,47 @@ class InMemoryStore:
                 "updatedAt": utc_now_iso(),
             }
             self._state["communicationDrafts"][draft["id"]] = draft
+            self.set_stage(workflow_id, "follow_up_sent")
             self.integration_event(workflow_id, "gmail", result.get("operation", "draft"), result.get("messageId") or result.get("draftId"), {}, result, "succeeded", result.get("traceId"))
             self.audit(workflow_id, "gmail.message.sent" if result.get("status") == "sent" else "gmail.draft.created", "system", "gmail", "Approved candidate communication processed through Gmail.", {"approvalId": approval_id}, "candidate_visible", result.get("traceId"))
             return deepcopy(draft)
+
+    def record_agent_run(
+        self,
+        *,
+        workflow_id: str,
+        trace_id: str,
+        agent_name: str,
+        mode: str,
+        provider: str,
+        input_summary: str,
+        output_summary: dict[str, Any],
+        status: str,
+    ) -> dict[str, Any]:
+        event = {
+            "id": f"run_{uuid4().hex[:10]}",
+            "workflowId": workflow_id,
+            "traceId": trace_id,
+            "agentName": agent_name,
+            "mode": mode,
+            "provider": provider,
+            "inputSummary": input_summary,
+            "outputSummary": deepcopy(output_summary),
+            "status": status,
+            "humanApprovalStatus": "required",
+            "createdAt": utc_now_iso(),
+        }
+        self._state.setdefault("agentRuns", []).append(event)
+        return deepcopy(event)
+
+    def agent_trace(self, workflow_id: str) -> dict[str, Any]:
+        return {
+            "workflowId": workflow_id,
+            "agentRuns": [deepcopy(e) for e in self._state.get("agentRuns", []) if e["workflowId"] == workflow_id],
+            "approvals": [deepcopy(a) for a in self._state["approvalRequests"].values() if a["workflowId"] == workflow_id],
+            "integrationEvents": [deepcopy(e) for e in self._state["integrationEvents"] if e["workflowId"] == workflow_id],
+            "auditEvents": self.timeline(workflow_id, candidate_visible=False),
+        }
 
     def integration_event(self, workflow_id: str, provider: str, operation: str, external_id: str | None, request: dict[str, Any], response: dict[str, Any], status: str, trace_id: str | None) -> None:
         self._state["integrationEvents"].append(

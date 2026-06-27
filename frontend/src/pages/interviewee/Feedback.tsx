@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 export default function Feedback() {
   const { addenda, timelineEvents } = useWorkflow();
-  const followUpApproved = timelineEvents.some(event => event.type === 'follow_up_sent');
+  const followUpApproved = timelineEvents.some(event => event.type === 'follow_up_sent' || event.type === 'gmail.draft.created' || event.type === 'gmail.message.sent');
   const addendum = addenda[0];
 
   return (

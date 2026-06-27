@@ -1,8 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User } from '../types';
+import { login as backendLogin } from '@/api/supworkClient';
+import { AuthSession, User } from '../types';
 
 interface AuthContextType {
   user: User | null;
+  accessToken: string | null;
+  backendAvailable: boolean;
   login: (email: string, pass: string) => Promise<void>;
   logout: () => void;
 }
@@ -11,45 +14,61 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [backendAvailable, setBackendAvailable] = useState(false);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem('supwork-demo-user');
+    const stored = window.localStorage.getItem('supwork-demo-session');
     if (stored) {
-      setUser(JSON.parse(stored) as User);
+      const session = JSON.parse(stored) as AuthSession;
+      setUser(session.user);
+      setAccessToken(session.accessToken);
+      setBackendAvailable(session.backendAvailable);
+      return;
+    }
+    const legacy = window.localStorage.getItem('supwork-demo-user');
+    if (legacy) {
+      setUser(JSON.parse(legacy) as User);
     }
   }, []);
 
   const login = async (email: string, pass: string) => {
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        if (pass !== 'demo') {
-          reject(new Error('Invalid password'));
-          return;
-        }
-        if (email === 'interviewee@demo.supwork.local') {
-          const nextUser: User = { id: 'u_interviewee_maya', email, role: 'interviewee', name: 'Maya Tan' };
-          setUser(nextUser);
-          window.localStorage.setItem('supwork-demo-user', JSON.stringify(nextUser));
-          resolve();
-        } else if (email === 'hr@demo.supwork.local') {
-          const nextUser: User = { id: 'u_hr_alex', email, role: 'hr', name: 'Alex Lee' };
-          setUser(nextUser);
-          window.localStorage.setItem('supwork-demo-user', JSON.stringify(nextUser));
-          resolve();
-        } else {
-          reject(new Error('User not found'));
-        }
-      }, 500);
-    });
+    try {
+      const session = await backendLogin(email, pass);
+      setUser(session.user);
+      setAccessToken(session.accessToken);
+      setBackendAvailable(true);
+      window.localStorage.setItem('supwork-demo-session', JSON.stringify(session));
+      window.localStorage.removeItem('supwork-demo-user');
+      return;
+    } catch {
+      if (pass !== 'demo') {
+        throw new Error('Invalid password');
+      }
+      const nextUser = fallbackUser(email);
+      const session: AuthSession = {
+        accessToken: '',
+        backendAvailable: false,
+        user: nextUser,
+      };
+      setUser(nextUser);
+      setAccessToken(null);
+      setBackendAvailable(false);
+      window.localStorage.setItem('supwork-demo-session', JSON.stringify(session));
+      window.localStorage.removeItem('supwork-demo-user');
+    }
   };
 
   const logout = () => {
     setUser(null);
+    setAccessToken(null);
+    setBackendAvailable(false);
+    window.localStorage.removeItem('supwork-demo-session');
     window.localStorage.removeItem('supwork-demo-user');
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, accessToken, backendAvailable, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -61,4 +80,14 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+function fallbackUser(email: string): User {
+  if (email === 'interviewee@demo.supwork.local') {
+    return { id: 'u_interviewee_maya', email, role: 'interviewee', name: 'Maya Tan' };
+  }
+  if (email === 'hr@demo.supwork.local') {
+    return { id: 'u_hr_alex', email, role: 'hr', name: 'Alex Lee' };
+  }
+  throw new Error('User not found');
 }

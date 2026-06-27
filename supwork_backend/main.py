@@ -16,12 +16,14 @@ from supwork_backend.schemas import (
     AddendumRequest,
     ApprovalCreateRequest,
     ApprovalDecisionResponse,
+    FeedbackReleaseApprovalRequest,
     FeedbackDraftRequest,
     GmailDraftRequest,
     GoogleScheduleRequest,
     LoginRequest,
     LoginResponse,
     NotesRequest,
+    RoundCompleteRequest,
     ResearchRequest,
 )
 from supwork_backend.store import ForbiddenError, InMemoryStore, NotFoundError
@@ -95,6 +97,10 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     def me(actor: dict[str, Any] = Depends(current_actor)) -> dict[str, Any]:
         return {"user": actor, "workflowIds": store.workflow_ids_for_actor(actor)}
 
+    @app.post("/api/demo/reset")
+    def reset_demo(actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        return store.reset_demo(keep_tokens=True)
+
     @app.get("/api/candidate/workflows/{workflow_id}")
     def candidate_workflow(workflow_id: str, actor: dict[str, Any] = Depends(current_actor)) -> dict[str, Any]:
         try:
@@ -130,6 +136,14 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     def recruiter_workflow(workflow_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         try:
             return store.recruiter_view(workflow_id)
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/analyze-evidence")
+    def analyze_evidence(workflow_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        try:
+            provider_mode = settings.model_provider if settings.supwork_provider == "live" else "mock"
+            return store.analyze_evidence(workflow_id, actor, provider_mode)
         except Exception as exc:
             raise handle_error(exc) from exc
 
@@ -177,12 +191,45 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
         except Exception as exc:
             raise handle_error(exc) from exc
 
+    @app.post("/api/recruiter/workflows/{workflow_id}/rounds/{round_id}/complete")
+    def complete_round(workflow_id: str, round_id: str, request: RoundCompleteRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        try:
+            return store.complete_round(workflow_id, round_id, request.notes, request.visibility, actor)
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
     @app.post("/api/recruiter/workflows/{workflow_id}/candidate-safe-summary")
     def feedback_draft(workflow_id: str, request: FeedbackDraftRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         try:
             view = store.recruiter_view(workflow_id)
             draft = model.feedback_draft(view, request.nextStep)
             return store.save_feedback_draft(workflow_id, draft["subject"], draft["body"], draft["safety"], actor)
+        except Exception as exc:
+            raise handle_error(exc) from exc
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/feedback-draft")
+    def feedback_draft_alias(workflow_id: str, request: FeedbackDraftRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        return feedback_draft(workflow_id, request, actor)
+
+    @app.post("/api/recruiter/workflows/{workflow_id}/feedback-release-approval")
+    def feedback_release_approval(workflow_id: str, request: FeedbackReleaseApprovalRequest, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        try:
+            draft = store.latest_feedback_draft(workflow_id)
+            approval = store.create_approval(
+                workflow_id,
+                request.actionType,
+                {
+                    "channel": request.channel,
+                    "draftId": draft["id"],
+                    "subject": draft["subject"],
+                    "candidateFacing": True,
+                },
+                request.riskLevel,
+                request.channel,
+                actor,
+            )
+            linked_draft = store.link_draft_approval(draft["id"], approval["id"])
+            return {"approval": approval, "draft": linked_draft}
         except Exception as exc:
             raise handle_error(exc) from exc
 
@@ -262,6 +309,7 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
             store.require_approved(request.approvalId, request.workflowId, {"create_gmail_draft", "send_candidate_follow_up"})
             live = settings.supwork_provider == "live" and settings.google_configured and bool(settings.gmail_sender_email)
             result = google.create_gmail_draft(request.model_dump(), live=live, send=send)
+            result["approvedBody"] = request.body
             draft = store.save_gmail_result(request.workflowId, request.approvalId, result)
             return {"draft": draft, "providerResult": result}
         except GoogleProviderNotConfigured as exc:
@@ -293,6 +341,10 @@ def create_app(settings: Settings | None = None, store: InMemoryStore | None = N
     @app.get("/api/audit-log")
     def audit_log(workflowId: str = "wf_demo", actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
         return {"events": store.timeline(workflowId, candidate_visible=False)}
+
+    @app.get("/api/workflows/{workflow_id}/agent-trace")
+    def agent_trace(workflow_id: str, actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, Any]:
+        return store.agent_trace(workflow_id)
 
     @app.post("/api/model/chat")
     def model_chat(payload: dict[str, str], actor: dict[str, Any] = Depends(require_recruiter)) -> dict[str, str]:

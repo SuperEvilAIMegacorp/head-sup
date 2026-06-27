@@ -138,6 +138,7 @@ def demo_state() -> dict:
         "communicationDrafts": {},
         "approvalRequests": {},
         "integrationEvents": [],
+        "agentRuns": [],
         "auditEvents": [
             {
                 "id": "aud_seed",
